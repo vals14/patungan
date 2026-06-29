@@ -28,7 +28,14 @@
       "expo-router",
       "expo-web-browser",
       "expo-font",
-      "expo-splash-screen"
+      "expo-splash-screen",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Patungan accesses your photos so you can pick a receipt image.",
+          "cameraPermission": "Patungan uses the camera to scan receipts."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

@@ -33,7 +33,19 @@ const CATEGORIES: { key: ExpenseCategory; emoji: string; label: string }[] = [
 ]
 
 export default function NewExpenseScreen() {
-  const { groupId, expenseId } = useLocalSearchParams<{ groupId: string; expenseId?: string }>()
+  // Besides groupId/expenseId, the scan path hands back prefill params
+  // (title/amount/currency/category/receiptImageUrl) from the review screen.
+  const params = useLocalSearchParams<{
+    groupId: string
+    expenseId?: string
+    title?: string
+    amount?: string
+    currency?: string
+    category?: string
+    receiptImageUrl?: string
+  }>()
+  const groupId = params.groupId
+  const expenseId = params.expenseId
   const isEditing = !!expenseId
   const { groups, refresh } = useGroups()
   const { width } = useWindowDimensions()
@@ -45,15 +57,17 @@ export default function NewExpenseScreen() {
   const [toast, setToast] = useState('')
   const [members, setMembers] = useState<any[]>([])
 
-  const [amount, setAmount] = useState('')
-  const [currency, setCurrency] = useState('IDR')
+  const [amount, setAmount] = useState(params.amount ?? '')
+  const [currency, setCurrency] = useState(params.currency || 'IDR')
   const [rate, setRate] = useState('1')
   const [showCurMenu, setShowCurMenu] = useState(false)
-  const [title, setTitle] = useState('')
-  const [category, setCategory] = useState<ExpenseCategory>('Food')
+  const [title, setTitle] = useState(params.title ?? '')
+  const [category, setCategory] = useState<ExpenseCategory>((params.category as ExpenseCategory) || 'Food')
   const [date, setDate] = useState(() => new Date().toISOString().split('T')[0])
   const [paidBy, setPaidBy] = useState<string | null>(null)
   const [splitBetween, setSplitBetween] = useState<Record<string, boolean>>({})
+  // Signed receipt URL carried in from the scan path; persisted on save. Null for manual entry.
+  const [receiptImageUrl] = useState<string | null>(params.receiptImageUrl || null)
 
   const group = groups.find(g => g.group.id === groupId)
   const groupCurrency = group?.group.currency ?? 'IDR'
@@ -68,9 +82,10 @@ export default function NewExpenseScreen() {
   const shareEach = splitIds.length ? amountNum / splitIds.length : 0
 
   // Default the expense currency to the group's currency once the group loads.
-  // Skip when editing — the loaded expense already carries its own currency.
+  // Skip when editing (the loaded expense carries its own currency) and when the
+  // scan path already supplied a currency via params.
   useEffect(() => {
-    if (group && !isEditing) setCurrency(group.group.currency)
+    if (group && !isEditing && !params.currency) setCurrency(group.group.currency)
   }, [group?.group.currency, isEditing])
 
   function showToast(msg: string) {
@@ -154,6 +169,7 @@ export default function NewExpenseScreen() {
         category,
         date,
         splitBetweenMemberIds: splitIds,
+        receiptImageUrl: receiptImageUrl ?? undefined,
       }
       if (isEditing) {
         await updateSimpleExpense(expenseId!, payload)
@@ -406,7 +422,10 @@ export default function NewExpenseScreen() {
             </View>
             <TouchableOpacity
               style={s.segBtn}
-              onPress={() => showToast('Scan invoice — coming soon')}
+              onPress={() => router.push({
+                pathname: '/(app)/expense/scan',
+                params: { groupId, title, currency, category },
+              })}
             >
               <Text style={s.segTxt}>⌖ Scan invoice</Text>
             </TouchableOpacity>

@@ -143,6 +143,7 @@ export interface CreateSimpleExpenseInput {
   category: ExpenseCategory
   date: string
   splitBetweenMemberIds: string[]
+  receiptImageUrl?: string
 }
 
 export async function createSimpleExpense(input: CreateSimpleExpenseInput): Promise<Expense> {
@@ -158,6 +159,7 @@ export async function createSimpleExpense(input: CreateSimpleExpenseInput): Prom
       amount_in_group_currency: input.amountInGroupCurrency,
       category: input.category,
       date: input.date,
+      receipt_image_url: input.receiptImageUrl ?? null,
     })
     .select()
     .single()
