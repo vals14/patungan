@@ -11,6 +11,7 @@ import { getGroupMembers } from '../../../src/services/groupService'
 import {
   createSimpleExpense, updateSimpleExpense, getExpenseById, deleteExpense,
 } from '../../../src/services/expenseService'
+import { getExchangeRate } from '../../../src/services/ratesService'
 import { supabase } from '../../../src/lib/supabase'
 import { ExpenseCategory } from '../../../src/types/database'
 import { useGroups } from '../../../src/context/GroupsContext'
@@ -31,6 +32,14 @@ const CATEGORIES: { key: ExpenseCategory; emoji: string; label: string }[] = [
   { key: 'Shopping', emoji: '🛍️', label: 'Shopping' },
   { key: 'Other', emoji: '✦', label: 'Other' },
 ]
+
+// Format an FX rate with enough precision for both large (e.g. 16000) and tiny
+// (e.g. 0.0000833 for IDR->SGD) values, trimming trailing zeros.
+function formatRate(r: number): string {
+  if (r >= 100) return String(Math.round(r))
+  if (r >= 1) return String(Number(r.toFixed(4)))
+  return String(Number(r.toPrecision(4)))
+}
 
 export default function NewExpenseScreen() {
   // Besides groupId/expenseId, the scan path hands back prefill params
@@ -68,6 +77,8 @@ export default function NewExpenseScreen() {
   const [splitBetween, setSplitBetween] = useState<Record<string, boolean>>({})
   // Signed receipt URL carried in from the scan path; persisted on save. Null for manual entry.
   const [receiptImageUrl] = useState<string | null>(params.receiptImageUrl || null)
+  // FX rate fetch status, shown next to the editable rate field.
+  const [rateStatus, setRateStatus] = useState<'loading' | 'live' | 'fallback' | 'manual' | 'failed' | null>(null)
 
   const group = groups.find(g => g.group.id === groupId)
   const groupCurrency = group?.group.currency ?? 'IDR'
@@ -87,6 +98,34 @@ export default function NewExpenseScreen() {
   useEffect(() => {
     if (group && !isEditing && !params.currency) setCurrency(group.group.currency)
   }, [group?.group.currency, isEditing])
+
+  // Auto-fetch the live FX rate when the expense currency differs from the group's.
+  // Only re-runs when the currency pair or date changes (never on every keystroke),
+  // and is skipped while editing so a saved/locked rate is never clobbered. On a
+  // network/function failure it keeps whatever rate is already in the field and just
+  // flags it, so the flow never blocks.
+  useEffect(() => {
+    if (isEditing) return
+    if (currency === groupCurrency) { setRateStatus(null); return }
+    let cancelled = false
+    setRateStatus('loading')
+    // Optimistic approximate from the static reference rates so a prefilled/scan
+    // currency shows a sensible number immediately and survives a failed live fetch.
+    const preset = cur.rate / groupCur.rate
+    if (preset !== 1) setRate(formatRate(preset))
+    const todayStr = new Date().toISOString().slice(0, 10)
+    const fetchDate = date && date < todayStr ? date : undefined
+    getExchangeRate(currency, groupCurrency, fetchDate).then(result => {
+      if (cancelled) return
+      if (result) {
+        setRate(formatRate(result.rate))
+        setRateStatus(result.source)
+      } else {
+        setRateStatus('failed')
+      }
+    })
+    return () => { cancelled = true }
+  }, [currency, groupCurrency, date, isEditing])
 
   function showToast(msg: string) {
     setToast(msg)
@@ -155,6 +194,7 @@ export default function NewExpenseScreen() {
     if (!title.trim()) { showToast('Give it a title'); return }
     if (!paidBy) { showToast('Select who paid'); return }
     if (!splitIds.length) { showToast('Select who to split between'); return }
+    if (!isGroupCurrency && !(parseFloat(rate) > 0)) { showToast('Enter a valid exchange rate'); return }
 
     setSaving(true)
     try {
@@ -369,8 +409,8 @@ export default function NewExpenseScreen() {
                 style={[s.curItem, currency === c.code && s.curItemActive]}
                 onPress={() => {
                   setCurrency(c.code)
-                  // Preset rate as "1 {c.code} = N {groupCurrency}", derived from the
-                  // IDR-based reference rates. Equals 1 when it's the group currency.
+                  // Optimistic preset from the static reference rates for instant feedback;
+                  // the auto-fetch effect overrides this with the live rate when it returns.
                   const presetRate = c.rate / groupCur.rate
                   setRate(presetRate === 1 ? '1' : String(Number(presetRate.toFixed(4))))
                   setShowCurMenu(false)
@@ -457,11 +497,21 @@ export default function NewExpenseScreen() {
                 <TextInput
                   style={s.fxInput as any}
                   value={rate}
-                  onChangeText={v => setRate(v.replace(/[^\d.]/g, ''))}
+                  onChangeText={v => { setRate(v.replace(/[^\d.]/g, '')); setRateStatus('manual') }}
                   keyboardType="decimal-pad"
                   placeholderTextColor="rgba(255,255,255,0.25)"
                 />
                 <Text style={s.fxLabel}>{groupCurrency}</Text>
+                {rateStatus === 'loading'
+                  ? <ActivityIndicator size="small" color={Colors.lime} style={{ marginLeft: 4 }} />
+                  : rateStatus
+                    ? <Text style={[s.fxStatus, rateStatus === 'failed' && s.fxStatusWarn]}>
+                        {rateStatus === 'live' ? 'live rate'
+                          : rateStatus === 'fallback' ? 'nearest day'
+                          : rateStatus === 'manual' ? 'edited'
+                          : 'offline'}
+                      </Text>
+                    : null}
                 <Text style={s.fxResult}>
                   ≈ {fmtGroup(amountInGroup)}
                 </Text>
@@ -566,6 +616,8 @@ const s = StyleSheet.create({
   fxLabel: { fontFamily: 'PlusJakartaSans_600SemiBold', fontSize: 12, color: Colors.textOnDarkMuted },
   fxInput: { width: 96, backgroundColor: 'rgba(255,255,255,0.08)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)', borderRadius: 9, paddingHorizontal: 10, paddingVertical: 7, color: Colors.textOnDark, fontFamily: 'SpaceGrotesk_700Bold', fontSize: 13 },
   fxResult: { fontFamily: 'SpaceGrotesk_700Bold', fontSize: 14, color: Colors.textOnDark, marginLeft: 'auto' as any },
+  fxStatus: { fontFamily: 'PlusJakartaSans_600SemiBold', fontSize: 11, color: Colors.textOnDarkMuted },
+  fxStatusWarn: { color: Colors.coral },
 
   // Currency dropdown — rendered as overlay at root level, above everything
   curOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 99 },
