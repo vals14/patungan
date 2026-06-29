@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabase'
 import { Group, GroupMember } from '../types/database'
+import { getGroupBalances } from './balanceService'
 
 function generateInviteCode(): string {
   return Math.random().toString(36).substring(2, 10).toUpperCase()
@@ -46,26 +47,10 @@ export async function getMyGroups(): Promise<GroupWithBalance[]> {
         .select('*', { count: 'exact', head: true })
         .eq('group_id', group.id)
 
-      // All splits across the group's expenses (amounts already in group currency).
-      const { data: splits } = await supabase
-        .from('expense_splits')
-        .select('amount_owed, is_settled, user_id, expense:expenses!inner(paid_by, group_id)')
-        .eq('expenses.group_id', group.id)
-
-      let myBalance = 0
-      if (splits) {
-        splits.forEach((s: any) => {
-          if (s.is_settled) return
-          const paidBy = s.expense?.paid_by
-          if (paidBy === myMemberId && s.user_id !== myMemberId) {
-            // I paid; this is someone else's share they owe me.
-            myBalance += Number(s.amount_owed)
-          } else if (paidBy !== myMemberId && s.user_id === myMemberId) {
-            // Someone else paid; this is my share that I owe them.
-            myBalance -= Number(s.amount_owed)
-          }
-        })
-      }
+      // Use the shared net formula (expenses − splits + settlements) so the home
+      // balance always matches the group screen's Balances tab.
+      const bal = await getGroupBalances(group.id)
+      const myBalance = bal.members.find(b => b.memberId === myMemberId)?.net ?? 0
 
       return {
         group,

@@ -12,6 +12,13 @@ import {
   addManualMember, updateMemberName, removeMember,
 } from '../../../src/services/groupService'
 import { getGroupExpenses } from '../../../src/services/expenseService'
+import {
+  computeMemberBalances, computeSettlementPlan, MemberBalance, SettlementTransfer,
+} from '../../../src/services/balanceService'
+import {
+  getSettlements, recordSettlement, undoSettlement, PayMethod,
+} from '../../../src/services/settlementService'
+import { SettleSheet } from '../../../src/components/SettleSheet'
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
 const C = {
@@ -92,12 +99,17 @@ export default function GroupDetailScreen() {
   const { width } = useWindowDimensions()
   const isWide = width >= 900
 
-  const { groups: contextGroups } = useGroups()
+  const { refresh: refreshGroups } = useGroups()
 
   const [group, setGroup] = useState<Group | null>(null)
   const [members, setMembers] = useState<any[]>([])
   const [expenses, setExpenses] = useState<any[]>([])
   const [myBalance, setMyBalance] = useState(0)
+  const [memberBalances, setMemberBalances] = useState<MemberBalance[]>([])
+  const [totalSpend, setTotalSpend] = useState(0)
+  const [settlements, setSettlements] = useState<any[]>([])
+  const [plan, setPlan] = useState<SettlementTransfer[]>([])
+  const [settleTarget, setSettleTarget] = useState<SettlementTransfer | null>(null)
   const [loading, setLoading] = useState(true)
 
   const [activeTab, setActiveTab] = useState<TabKey>('expenses')
@@ -117,21 +129,33 @@ export default function GroupDetailScreen() {
         getGroupMembers(id),
         getGroupExpenses(id),
       ])
+      // Settlements are non-fatal: until migration 0005 retargets the FK, the join
+      // hint errors — degrade to an empty list so balances still render.
+      let setls: any[] = []
+      try { setls = await getSettlements(id) } catch { setls = [] }
       setGroup(g)
       setMembers(m)
       setExpenses(exps)
+      setSettlements(setls)
+
+      // Compute net balances from the freshly loaded data so the balance card and
+      // the Balances/Settle tabs always agree (one formula via balanceService).
+      const memberLites = m.map((mm: any) => ({ id: mm.id, name: getMemberDisplayName(mm) }))
+      const settleRows = setls.map((s: any) => ({
+        from_user: s.from_member?.id, to_user: s.to_member?.id, amount: s.amount,
+      }))
+      const { members: bals, totalGroupSpend } = computeMemberBalances(memberLites, exps as any, settleRows)
+      setMemberBalances(bals)
+      setTotalSpend(totalGroupSpend)
+      setPlan(computeSettlementPlan(bals))
+      const myMemberId = m.find((mm: any) => mm.user?.id === user?.id)?.id
+      setMyBalance(bals.find(b => b.memberId === myMemberId)?.net ?? 0)
     } catch {
       router.push('/(app)/home')
     } finally {
       setLoading(false)
     }
-  }, [id])
-
-  // Sync balance from shared context whenever it updates
-  useEffect(() => {
-    const found = contextGroups.find(ag => ag.group.id === id)
-    if (found) setMyBalance(found.myBalance)
-  }, [contextGroups, id])
+  }, [id, user?.id])
 
   // Refetch whenever the screen regains focus (e.g. returning from Add expense).
   useFocusEffect(useCallback(() => { loadData() }, [loadData]))
@@ -196,6 +220,26 @@ export default function GroupDetailScreen() {
     setMemberEditOpen(false)
     setEditingId(null)
     setManualName('')
+  }
+
+  async function handleConfirmSettle(method: PayMethod) {
+    if (!settleTarget) return
+    try {
+      await recordSettlement(id, settleTarget.fromMemberId, settleTarget.toMemberId, settleTarget.amount, method)
+      setSettleTarget(null)
+      flash('Payment recorded')
+      await loadData()
+      refreshGroups()
+    } catch (e: any) { flash(e.message) }
+  }
+
+  async function handleUndo(settlementId: string) {
+    try {
+      await undoSettlement(settlementId)
+      flash('Settlement undone')
+      await loadData()
+      refreshGroups()
+    } catch (e: any) { flash(e.message) }
   }
 
   if (loading) {
@@ -461,12 +505,106 @@ export default function GroupDetailScreen() {
     </View>
   )
 
+  // ── Balances tab: total spend + per-member share bar + net ──────────────────
+  const BalancesContent = totalSpend === 0 ? (
+    <EmptyState icon="⚖️" title="No balances yet" sub="Add expenses to see who owes whom." />
+  ) : (
+    <View style={{ gap: 10 }}>
+      <View style={s.spendCard}>
+        <Text style={s.spendLabel}>Total group spend</Text>
+        <Text style={s.spendValue}>{fmtAmt(totalSpend, group.currency)}</Text>
+      </View>
+      {memberBalances.map((b, idx) => {
+        const pct = totalSpend > 0 ? Math.round((b.paidTotal / totalSpend) * 100) : 0
+        const t = TILE_PALETTE[idx % TILE_PALETTE.length]
+        const netColor = b.net > 0 ? C.positive : b.net < 0 ? C.negative : C.muted1
+        const netLabel = b.net > 0
+          ? `gets back ${fmtAmt(Math.abs(b.net), group.currency)}`
+          : b.net < 0
+            ? `owes ${fmtAmt(Math.abs(b.net), group.currency)}`
+            : 'settled up'
+        return (
+          <View key={b.memberId} style={s.balRow}>
+            <View style={s.balRowTop}>
+              <View style={s.balRowLeft}>
+                <View style={[s.balAvatar, { backgroundColor: t.bg }]}>
+                  <Text style={[s.balAvatarText, { color: t.text }]}>{b.name.charAt(0).toUpperCase()}</Text>
+                </View>
+                <Text style={s.balName} numberOfLines={1}>{b.name}</Text>
+              </View>
+              <Text style={[s.balNet, { color: netColor }]}>{netLabel}</Text>
+            </View>
+            <View style={s.barTrack}><View style={[s.barFill, { width: `${pct}%` }]} /></View>
+            <Text style={s.balPaid}>paid {fmtAmt(b.paidTotal, group.currency)} · {pct}% of spend</Text>
+          </View>
+        )
+      })}
+    </View>
+  )
+
+  // ── Settle tab: greedy settle-up plan + already-settled list with undo ───────
+  const SettleContent = (plan.length === 0 && settlements.length === 0) ? (
+    <EmptyState icon="✅" title="Nothing to settle" sub="All members are settled up." />
+  ) : (
+    <View style={{ gap: 10 }}>
+      {plan.length > 0 && (
+        <>
+          <Text style={s.settleHeading}>Simplest way to settle up</Text>
+          <Text style={s.settleSub}>{plan.length} transfer{plan.length !== 1 ? 's' : ''} to clear all debts</Text>
+          {plan.map((t, idx) => (
+            <View key={idx} style={s.settleRow}>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={s.settleText} numberOfLines={1}>
+                  <Text style={s.settleName}>{t.fromName}</Text>
+                  <Text style={s.settleArrow}>  →  </Text>
+                  <Text style={s.settleName}>{t.toName}</Text>
+                </Text>
+                <Text style={s.settleAmount}>{fmtAmt(t.amount, group.currency)}</Text>
+              </View>
+              <TouchableOpacity style={s.settleBtn} onPress={() => setSettleTarget(t)}>
+                <Text style={s.settleBtnText}>Settle</Text>
+              </TouchableOpacity>
+            </View>
+          ))}
+        </>
+      )}
+      {settlements.length > 0 && (
+        <View style={{ marginTop: plan.length > 0 ? 14 : 0, gap: 8 }}>
+          <Text style={s.settleHeading}>Already settled</Text>
+          {settlements.map((st: any) => {
+            const fromN = st.from_member?.user?.display_name ?? st.from_member?.name ?? '?'
+            const toN = st.to_member?.user?.display_name ?? st.to_member?.name ?? '?'
+            return (
+              <View key={st.id} style={s.settledRow}>
+                <Text style={s.settledText} numberOfLines={1}>
+                  {fromN} paid {toN} · {String(st.method).replace('_', ' ')}
+                </Text>
+                <TouchableOpacity onPress={() => handleUndo(st.id)}>
+                  <Text style={s.undoText}>Undo</Text>
+                </TouchableOpacity>
+              </View>
+            )
+          })}
+        </View>
+      )}
+    </View>
+  )
+
   const TabContent = (
     <View style={{ flex: 1 }}>
       {activeTab === 'expenses' && ExpenseList}
-      {activeTab === 'balances' && <EmptyState icon="⚖️" title="No balances yet" sub="Add expenses to see who owes whom." />}
-      {activeTab === 'settle' && <EmptyState icon="✅" title="Nothing to settle" sub="All members are settled up." />}
+      {activeTab === 'balances' && BalancesContent}
+      {activeTab === 'settle' && SettleContent}
     </View>
+  )
+
+  const settleSheetEl = (
+    <SettleSheet
+      transfer={settleTarget}
+      currency={group.currency}
+      onClose={() => setSettleTarget(null)}
+      onConfirm={handleConfirmSettle}
+    />
   )
 
   // ── Toast ───────────────────────────────────────────────────────────────────
@@ -539,6 +677,7 @@ export default function GroupDetailScreen() {
         )}
 
         {MembersSheet}
+        {settleSheetEl}
       </View>
     )
   }
@@ -626,6 +765,7 @@ export default function GroupDetailScreen() {
       </ScrollView>
 
       {MembersSheet}
+      {settleSheetEl}
     </View>
   )
 }
@@ -633,6 +773,35 @@ export default function GroupDetailScreen() {
 // ── Styles ────────────────────────────────────────────────────────────────────
 const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: C.bg },
+
+  // Balances tab
+  spendCard:   { backgroundColor: C.ink, borderRadius: 18, paddingVertical: 16, paddingHorizontal: 18, marginBottom: 4 },
+  spendLabel:  { fontFamily: PJ6, fontSize: 12, color: C.onDark },
+  spendValue:  { fontFamily: SG7, fontSize: 24, color: C.lime, letterSpacing: -0.4, marginTop: 4 },
+  balRow:      { backgroundColor: C.white, borderRadius: 16, padding: 14 },
+  balRowTop:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, gap: 10 },
+  balRowLeft:  { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1, minWidth: 0 },
+  balAvatar:   { width: 32, height: 32, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  balAvatarText: { fontFamily: SG7, fontSize: 13 },
+  balName:     { fontFamily: PJ7, fontSize: 14, color: C.ink, flexShrink: 1 },
+  balNet:      { fontFamily: SG7, fontSize: 13, flexShrink: 0 },
+  barTrack:    { height: 8, borderRadius: 4, backgroundColor: C.bg, overflow: 'hidden' },
+  barFill:     { height: 8, borderRadius: 4, backgroundColor: C.lime },
+  balPaid:     { fontFamily: PJ5, fontSize: 12, color: C.muted1, marginTop: 8 },
+
+  // Settle tab
+  settleHeading: { fontFamily: PJ7, fontSize: 15, color: C.ink },
+  settleSub:     { fontFamily: PJ5, fontSize: 13, color: C.muted1, marginTop: -4, marginBottom: 2 },
+  settleRow:     { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: C.white, borderRadius: 16, paddingVertical: 12, paddingHorizontal: 16 },
+  settleText:    { fontFamily: PJ6, fontSize: 14, color: C.ink },
+  settleName:    { fontFamily: PJ7, fontSize: 14, color: C.ink },
+  settleArrow:   { fontFamily: PJ6, fontSize: 14, color: C.muted1 },
+  settleAmount:  { fontFamily: SG7, fontSize: 15, color: C.ink, marginTop: 3 },
+  settleBtn:     { backgroundColor: C.lime, borderRadius: 12, paddingHorizontal: 18, paddingVertical: 10, flexShrink: 0 },
+  settleBtnText: { fontFamily: SG7, fontSize: 14, color: C.ink },
+  settledRow:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, backgroundColor: C.white, borderRadius: 14, paddingVertical: 12, paddingHorizontal: 16 },
+  settledText:   { fontFamily: PJ6, fontSize: 13, color: C.muted1, flex: 1, minWidth: 0 },
+  undoText:      { fontFamily: PJ7, fontSize: 13, color: C.coral, flexShrink: 0 },
 
   // Toast
   toast:     { position: 'absolute', top: 28, left: '50%' as any, transform: [{ translateX: -100 }], zIndex: 80, backgroundColor: C.ink, paddingHorizontal: 22, paddingVertical: 12, borderRadius: 30 },
