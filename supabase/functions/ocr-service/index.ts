@@ -20,10 +20,18 @@ serve(async (req) => {
   }
 
   try {
+    console.log('[ocr-service] request received; MINDEE_API_KEY present:', !!MINDEE_API_KEY, 'len:', MINDEE_API_KEY?.length ?? 0)
+
+    // Fail loudly and clearly if the secret was never set on the function.
+    if (!MINDEE_API_KEY) {
+      return json({ error: 'MINDEE_API_KEY secret is not set on the edge function. Add it under Edge Functions -> Manage secrets and redeploy.' }, 500)
+    }
+
     const { imageBase64, filename } = await req.json()
     if (!imageBase64) {
       return json({ error: 'imageBase64 is required' }, 400)
     }
+    console.log('[ocr-service] imageBase64 length:', imageBase64.length)
 
     // Mindee expects multipart/form-data with the file.
     const binary = base64ToUint8Array(imageBase64)
@@ -35,9 +43,11 @@ serve(async (req) => {
       headers: { Authorization: `Token ${MINDEE_API_KEY}` },
       body: form,
     })
+    console.log('[ocr-service] Mindee responded with status:', mindeeRes.status)
 
     if (!mindeeRes.ok) {
       const errText = await mindeeRes.text()
+      console.error('[ocr-service] Mindee error body:', errText)
       return json({ error: `OCR provider error: ${mindeeRes.status}`, detail: errText }, 502)
     }
 
@@ -63,8 +73,10 @@ serve(async (req) => {
       line_items.push({ name: 'Total (no items detected)', amount: total })
     }
 
+    console.log('[ocr-service] parsed', line_items.length, 'items; total:', total, currency)
     return json({ line_items, total, currency })
   } catch (e) {
+    console.error('[ocr-service] exception:', e)
     return json({ error: String(e) }, 500)
   }
 })

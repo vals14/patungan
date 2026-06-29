@@ -25,6 +25,7 @@ export default function ScanScreen() {
   const [busy, setBusy] = useState(false)
   const [statusText, setStatusText] = useState('')
   const [toast, setToast] = useState('')
+  const [errorMsg, setErrorMsg] = useState('')
 
   function showToast(msg: string) {
     setToast(msg)
@@ -58,6 +59,7 @@ export default function ScanScreen() {
       // Downscale to max 1600px wide and re-encode as JPEG with base64.
       // Receipts don't need full resolution; smaller uploads + OCR faster.
       setStatusText('Preparing image…')
+      console.log('[scan] got image uri:', uri)
       const context = ImageManipulator.manipulate(uri)
       context.resize({ width: 1600 })
       const rendered = await context.renderAsync()
@@ -67,14 +69,17 @@ export default function ScanScreen() {
         base64: true,
       })
       const base64 = manipulated.base64
+      console.log('[scan] manipulated, base64 length:', base64?.length ?? 0)
       if (!base64) throw new Error('Could not process the image.')
 
       // Fire OCR and upload in parallel — upload failure must not block the scan.
       setStatusText('Reading the receipt…')
+      console.log('[scan] calling OCR + upload…')
       const [ocr, imageUrl] = await Promise.all([
         scanReceipt(base64, 'receipt.jpg'),
         user ? uploadReceiptImage(base64, user.id) : Promise.resolve(null),
       ])
+      console.log('[scan] OCR ok:', ocr.line_items.length, 'items, total', ocr.total, ocr.currency, '| upload:', imageUrl ? 'ok' : 'none')
 
       // Hand off to the review screen with extracted items.
       router.replace({
@@ -91,9 +96,13 @@ export default function ScanScreen() {
         },
       })
     } catch (e: any) {
+      console.error('[scan] failed:', e)
       setBusy(false)
       setPreview(null)
-      showToast(e.message ?? 'Scan failed. Try again or enter manually.')
+      // Persist the real error on screen until dismissed, so it can be read
+      // (the toast auto-hides too fast for a long message).
+      setErrorMsg(e?.message ?? 'Scan failed. Try again or enter manually.')
+      showToast(e?.message ?? 'Scan failed. Try again or enter manually.')
     }
   }
 
@@ -134,6 +143,12 @@ export default function ScanScreen() {
           <Text style={styles.subLead}>
             Snap a photo or pick from your gallery. We'll pull out the items — you can fix anything before splitting.
           </Text>
+
+          {!!errorMsg && (
+            <View style={styles.errorBox}>
+              <Text style={styles.errorText}>{errorMsg}</Text>
+            </View>
+          )}
 
           <TouchableOpacity style={styles.bigBtn} onPress={pickFromCamera}>
             <Text style={styles.bigBtnEmoji}>📷</Text>
@@ -180,6 +195,9 @@ const styles = StyleSheet.create({
   // Light button: ink text on the card fill.
   bigBtnTitleAlt: { fontFamily: 'SpaceGrotesk_700Bold', fontSize: 16, color: Colors.ink },
   bigBtnSubAlt: { fontFamily: 'PlusJakartaSans_500Medium', fontSize: 12, color: Colors.textMuted, marginTop: 2 },
+
+  errorBox: { backgroundColor: '#FDECE7', borderWidth: 1, borderColor: Colors.coral, borderRadius: Radii.input, padding: 14, marginBottom: 20 },
+  errorText: { fontFamily: 'PlusJakartaSans_600SemiBold', fontSize: 13, color: '#B23A1E', lineHeight: 18 },
 
   manualLink: { alignItems: 'center', marginTop: 16, padding: 12 },
   manualLinkText: { fontFamily: 'PlusJakartaSans_700Bold', fontSize: 14, color: Colors.textMuted },

@@ -19,10 +19,28 @@ export async function scanReceipt(imageBase64: string, filename?: string): Promi
   })
 
   if (error) {
-    throw new Error('Could not read the receipt. Try again or enter items manually.')
+    // A non-2xx from the function comes back as a FunctionsHttpError whose
+    // `context` is the raw Response — pull its body so we see the real cause
+    // (missing secret, Mindee 401/404, wrong endpoint, etc.) instead of a
+    // generic message.
+    let detail = error.message ?? String(error)
+    try {
+      const ctx = (error as any).context
+      if (ctx && typeof ctx.json === 'function') {
+        const body = await ctx.json()
+        if (body?.error) detail = body.detail ? `${body.error} — ${body.detail}` : body.error
+      } else if (ctx && typeof ctx.text === 'function') {
+        detail = await ctx.text()
+      }
+    } catch {
+      /* keep the original message if the body can't be parsed */
+    }
+    console.error('[ocr] invoke error:', detail, error)
+    throw new Error(`Scan failed: ${detail}`)
   }
   if (data?.error) {
-    throw new Error(data.error)
+    console.error('[ocr] function returned error:', data)
+    throw new Error(data.detail ? `${data.error} — ${data.detail}` : data.error)
   }
 
   return {
