@@ -2,17 +2,31 @@
 // Swap providers by changing this file only. Frontend contract is fixed:
 //   IN:  { imageBase64: string, filename?: string }
 //   OUT: { line_items: { name: string, amount: number }[], total: number, currency: string }
+//
+// Provider: Claude vision (Anthropic Messages API). Reads messy/multilingual
+// receipts well and returns structured JSON. Set ANTHROPIC_API_KEY as a secret.
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 
-const MINDEE_API_KEY = Deno.env.get('MINDEE_API_KEY')!
-// Mindee Receipt OCR v5 endpoint. Verify the current version path in your Mindee dashboard.
-const MINDEE_URL = 'https://api.mindee.net/v1/products/mindee/expense_receipts/v5/predict'
+const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY')!
+const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages'
+// Vision-capable Claude model; override via the OCR_MODEL secret if desired.
+const OCR_MODEL = Deno.env.get('OCR_MODEL') ?? 'claude-sonnet-4-6'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
+
+const PROMPT = `You are a receipt parser. Extract the purchased line items, the total, and the currency from this receipt image.
+Respond with ONLY a JSON object (no markdown, no prose, no code fences) in exactly this shape:
+{"line_items":[{"name":"string","amount":number}],"total":number,"currency":"ISO"}
+Rules:
+- "amount" and "total" are plain numbers in the receipt's currency: no thousands separators, no currency symbols.
+- "currency" is the 3-letter ISO 4217 code (e.g. IDR, USD, SGD, EUR). Infer it from symbols/language/context; if truly unknown use "IDR".
+- "line_items" are the actual purchased products/services. Skip subtotal, tax, service charge, rounding, and total lines.
+- If you cannot read individual items but can read a total, return an empty "line_items" array with the total.
+- If the image is not a receipt, return {"line_items":[],"total":0,"currency":"IDR"}.`
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -20,55 +34,70 @@ serve(async (req) => {
   }
 
   try {
-    console.log('[ocr-service] request received; MINDEE_API_KEY present:', !!MINDEE_API_KEY, 'len:', MINDEE_API_KEY?.length ?? 0)
+    console.log('[ocr-service] request received; ANTHROPIC_API_KEY present:', !!ANTHROPIC_API_KEY, 'model:', OCR_MODEL)
 
-    // Fail loudly and clearly if the secret was never set on the function.
-    if (!MINDEE_API_KEY) {
-      return json({ error: 'MINDEE_API_KEY secret is not set on the edge function. Add it under Edge Functions -> Manage secrets and redeploy.' }, 500)
+    if (!ANTHROPIC_API_KEY) {
+      return json({ error: 'ANTHROPIC_API_KEY secret is not set on the edge function. Add it under Edge Functions -> Manage secrets and redeploy.' }, 500)
     }
 
-    const { imageBase64, filename } = await req.json()
+    const { imageBase64 } = await req.json()
     if (!imageBase64) {
       return json({ error: 'imageBase64 is required' }, 400)
     }
-    console.log('[ocr-service] imageBase64 length:', imageBase64.length)
+    // Accept either a raw base64 string or a data URI.
+    const cleaned = imageBase64.includes(',') ? imageBase64.split(',')[1] : imageBase64
+    console.log('[ocr-service] imageBase64 length:', cleaned.length)
 
-    // Mindee expects multipart/form-data with the file.
-    const binary = base64ToUint8Array(imageBase64)
-    const form = new FormData()
-    form.append('document', new Blob([binary]), filename ?? 'receipt.jpg')
-
-    const mindeeRes = await fetch(MINDEE_URL, {
+    const claudeRes = await fetch(ANTHROPIC_URL, {
       method: 'POST',
-      headers: { Authorization: `Token ${MINDEE_API_KEY}` },
-      body: form,
+      headers: {
+        'x-api-key': ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: OCR_MODEL,
+        max_tokens: 2048,
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: cleaned } },
+              { type: 'text', text: PROMPT },
+            ],
+          },
+        ],
+      }),
     })
-    console.log('[ocr-service] Mindee responded with status:', mindeeRes.status)
 
-    if (!mindeeRes.ok) {
-      const errText = await mindeeRes.text()
-      console.error('[ocr-service] Mindee error body:', errText)
-      return json({ error: `OCR provider error: ${mindeeRes.status}`, detail: errText }, 502)
+    console.log('[ocr-service] Claude responded with status:', claudeRes.status)
+    if (!claudeRes.ok) {
+      const errText = await claudeRes.text()
+      console.error('[ocr-service] Claude error body:', errText)
+      return json({ error: `OCR provider error: ${claudeRes.status}`, detail: errText }, 502)
     }
 
-    const data = await mindeeRes.json()
-    const prediction = data?.document?.inference?.prediction ?? {}
+    const data = await claudeRes.json()
+    const text: string = data?.content?.[0]?.text ?? ''
+    const parsed = extractJson(text)
+    if (!parsed) {
+      console.error('[ocr-service] could not parse JSON from model output:', text.slice(0, 300))
+      return json({ error: 'Could not parse the receipt. Try a clearer photo or enter items manually.' }, 502)
+    }
 
-    // Normalize Mindee's shape into our fixed contract.
-    // Mindee line_items: [{ description, total_amount, quantity, unit_price }]
-    const rawItems: any[] = prediction.line_items ?? []
+    // Normalize into the fixed contract.
+    const rawItems: any[] = Array.isArray(parsed.line_items) ? parsed.line_items : []
     const line_items = rawItems
       .map((item) => ({
-        name: (item.description ?? '').toString().trim() || 'Item',
-        amount: Number(item.total_amount ?? 0),
+        name: (item?.name ?? '').toString().trim() || 'Item',
+        amount: Number(item?.amount ?? 0),
       }))
       .filter((item) => item.amount > 0)
 
-    const total = Number(prediction.total_amount?.value ?? 0)
-    const currency = (prediction.locale?.currency ?? 'IDR').toString()
+    const total = Number(parsed.total ?? 0)
+    const currency = (parsed.currency ?? 'IDR').toString().toUpperCase().slice(0, 3)
 
-    // If Mindee found a total but no usable line items, return a single fallback row
-    // so the review screen always has something to edit rather than an empty list.
+    // Always give the review screen something to edit.
     if (line_items.length === 0 && total > 0) {
       line_items.push({ name: 'Total (no items detected)', amount: total })
     }
@@ -88,12 +117,15 @@ function json(body: unknown, status = 200) {
   })
 }
 
-function base64ToUint8Array(base64: string): Uint8Array {
-  const cleaned = base64.includes(',') ? base64.split(',')[1] : base64
-  const binaryString = atob(cleaned)
-  const bytes = new Uint8Array(binaryString.length)
-  for (let i = 0; i < binaryString.length; i++) {
-    bytes[i] = binaryString.charCodeAt(i)
+// Pull the first JSON object out of the model's text, tolerating stray prose or
+// ```json fences even though the prompt asks for raw JSON.
+function extractJson(text: string): any | null {
+  const start = text.indexOf('{')
+  const end = text.lastIndexOf('}')
+  if (start === -1 || end === -1 || end < start) return null
+  try {
+    return JSON.parse(text.slice(start, end + 1))
+  } catch {
+    return null
   }
-  return bytes
 }
