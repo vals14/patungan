@@ -51,6 +51,61 @@ export async function createSimpleExpense(input: CreateSimpleExpenseInput): Prom
   return expense
 }
 
+export interface CreateItemizedExpenseInput {
+  groupId: string
+  paidBy: string
+  title: string
+  totalAmount: number
+  currency: string
+  exchangeRateToGroupCurrency: number | null
+  amountInGroupCurrency: number
+  category: ExpenseCategory
+  date: string
+  receiptImageUrl?: string
+}
+
+// Like createSimpleExpense, but with explicit per-member split amounts (already in
+// the group's currency) for the itemized receipt-split flow. Splits are the
+// computed shares — items + proportional tax/service − discount, converted by rate.
+export async function createExpenseWithSplits(
+  input: CreateItemizedExpenseInput,
+  splits: { memberId: string; amount: number }[],
+): Promise<Expense> {
+  const { data: expense, error } = await supabase
+    .from('expenses')
+    .insert({
+      group_id: input.groupId,
+      paid_by: input.paidBy,
+      title: input.title,
+      total_amount: input.totalAmount,
+      currency: input.currency,
+      exchange_rate_to_group_currency: input.exchangeRateToGroupCurrency,
+      amount_in_group_currency: input.amountInGroupCurrency,
+      category: input.category,
+      date: input.date,
+      receipt_image_url: input.receiptImageUrl ?? null,
+    })
+    .select()
+    .single()
+
+  if (error) throw error
+
+  const rows = splits
+    .filter((s) => s.amount > 0)
+    .map((s) => ({
+      expense_id: expense.id,
+      user_id: s.memberId,
+      amount_owed: Math.round(s.amount * 100) / 100,
+      is_settled: false,
+    }))
+  if (rows.length > 0) {
+    const { error: splitError } = await supabase.from('expense_splits').insert(rows)
+    if (splitError) throw splitError
+  }
+
+  return expense
+}
+
 export async function getGroupExpenses(groupId: string): Promise<any[]> {
   const { data, error } = await supabase
     .from('expenses')

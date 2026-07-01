@@ -18,15 +18,19 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-const PROMPT = `You are a receipt parser. Extract the purchased line items, the total, and the currency from this receipt image.
+const PROMPT = `You are a receipt parser. Extract the purchased line items and the receipt-level charges from this receipt image.
 Respond with ONLY a JSON object (no markdown, no prose, no code fences) in exactly this shape:
-{"line_items":[{"name":"string","amount":number}],"total":number,"currency":"ISO"}
+{"line_items":[{"name":"string","amount":number}],"tax":number,"service":number,"discount":number,"total":number,"currency":"ISO"}
 Rules:
-- "amount" and "total" are plain numbers in the receipt's currency: no thousands separators, no currency symbols.
+- All amounts are plain numbers in the receipt's currency: no thousands separators, no currency symbols.
+- "line_items" are the actual purchased products/services only. Do NOT include subtotal, tax, service charge, discount, rounding, or total as line items.
+- "tax" is the total tax/VAT/PB1/PPN/GST amount (0 if none).
+- "service" is the total service-charge amount (0 if none).
+- "discount" is the total discount/promo amount as a POSITIVE number (0 if none).
+- "total" is the grand total actually paid.
 - "currency" is the 3-letter ISO 4217 code (e.g. IDR, USD, SGD, EUR). Infer it from symbols/language/context; if truly unknown use "IDR".
-- "line_items" are the actual purchased products/services. Skip subtotal, tax, service charge, rounding, and total lines.
 - If you cannot read individual items but can read a total, return an empty "line_items" array with the total.
-- If the image is not a receipt, return {"line_items":[],"total":0,"currency":"IDR"}.`
+- If the image is not a receipt, return {"line_items":[],"tax":0,"service":0,"discount":0,"total":0,"currency":"IDR"}.`
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -94,16 +98,22 @@ serve(async (req) => {
       }))
       .filter((item) => item.amount > 0)
 
+    const tax = Math.max(0, Number(parsed.tax ?? 0))
+    const service = Math.max(0, Number(parsed.service ?? 0))
+    const discount = Math.max(0, Number(parsed.discount ?? 0))
     const total = Number(parsed.total ?? 0)
     const currency = (parsed.currency ?? 'IDR').toString().toUpperCase().slice(0, 3)
 
     // Always give the review screen something to edit.
     if (line_items.length === 0 && total > 0) {
-      line_items.push({ name: 'Total (no items detected)', amount: total })
+      // Fall back to a single item = total minus the charges, so the itemized
+      // split still reconciles to the grand total once charges are re-added.
+      const base = Math.max(0, total - tax - service + discount)
+      line_items.push({ name: 'Total (no items detected)', amount: base || total })
     }
 
-    console.log('[ocr-service] parsed', line_items.length, 'items; total:', total, currency)
-    return json({ line_items, total, currency })
+    console.log('[ocr-service] parsed', line_items.length, 'items; tax:', tax, 'service:', service, 'discount:', discount, 'total:', total, currency)
+    return json({ line_items, tax, service, discount, total, currency })
   } catch (e) {
     console.error('[ocr-service] exception:', e)
     return json({ error: String(e) }, 500)

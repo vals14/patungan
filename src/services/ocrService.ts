@@ -7,6 +7,9 @@ export interface OcrLineItem {
 
 export interface OcrResult {
   line_items: OcrLineItem[]
+  tax: number
+  service: number
+  discount: number
   total: number
   currency: string
 }
@@ -45,6 +48,9 @@ export async function scanReceipt(imageBase64: string, filename?: string): Promi
 
   return {
     line_items: data.line_items ?? [],
+    tax: data.tax ?? 0,
+    service: data.service ?? 0,
+    discount: data.discount ?? 0,
     total: data.total ?? 0,
     currency: data.currency ?? 'IDR',
   }
