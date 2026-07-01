@@ -170,7 +170,7 @@ export default function GroupDetailScreen() {
     const text = `Join "${group.name}" on Patungan! Code: ${group.invite_code}`
     if (Platform.OS === 'web') {
       try { await (navigator as any).clipboard.writeText(text) } catch {}
-      flash('Invite link copied!')
+      flash('Invite copied!')
     } else {
       Share.share({ message: text })
     }
@@ -344,14 +344,16 @@ export default function GroupDetailScreen() {
           {/* Invite options — hidden when editing */}
           {!memberEditOpen && (
             <>
-              <TouchableOpacity style={[s.inviteRow, { marginTop: 20 }]} onPress={handleShareInvite}>
-                <View style={[s.inviteIcon, { backgroundColor: C.lime }]}><Text style={{ fontSize: 22 }}>🔗</Text></View>
-                <View style={{ flex: 1 }}>
-                  <Text style={s.inviteTitle}>Share invite link</Text>
-                  <Text style={s.inviteSub}>Anyone with the link can join</Text>
+              <View style={[s.inviteCodeCard, { marginTop: 20 }]}>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={s.inviteCodeLabel}>INVITE CODE</Text>
+                  <Text style={s.inviteCodeValue}>{group.invite_code}</Text>
+                  <Text style={s.inviteSub}>Share this code — anyone can join with it.</Text>
                 </View>
-                <Text style={s.inviteArrow}>›</Text>
-              </TouchableOpacity>
+                <TouchableOpacity style={s.copyCodeBtn} onPress={handleShareInvite}>
+                  <Text style={s.copyCodeBtnText}>Copy</Text>
+                </TouchableOpacity>
+              </View>
 
               <TouchableOpacity style={[s.inviteRow, { marginTop: 10 }]} onPress={() => flash('Contacts — coming soon')}>
                 <View style={[s.inviteIcon, { backgroundColor: C.ink }]}><Text style={{ fontSize: 22 }}>👥</Text></View>
@@ -802,6 +804,13 @@ const s = StyleSheet.create({
   settledRow:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, backgroundColor: C.white, borderRadius: 14, paddingVertical: 12, paddingHorizontal: 16 },
   settledText:   { fontFamily: PJ6, fontSize: 13, color: C.muted1, flex: 1, minWidth: 0 },
   undoText:      { fontFamily: PJ7, fontSize: 13, color: C.coral, flexShrink: 0 },
+
+  // Invite code card (members sheet)
+  inviteCodeCard:  { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: C.bg, borderRadius: 16, padding: 16, borderWidth: 1.5, borderColor: C.inputBorder },
+  inviteCodeLabel: { fontFamily: PJ7, fontSize: 11, color: C.muted2, letterSpacing: 0.6 },
+  inviteCodeValue: { fontFamily: SG7, fontSize: 22, color: C.ink, letterSpacing: 3, marginTop: 3, marginBottom: 3 },
+  copyCodeBtn:     { backgroundColor: C.ink, borderRadius: 12, paddingHorizontal: 18, paddingVertical: 11, flexShrink: 0 },
+  copyCodeBtnText: { fontFamily: SG7, fontSize: 13, color: C.white },
 
   // Toast
   toast:     { position: 'absolute', top: 28, left: '50%' as any, transform: [{ translateX: -100 }], zIndex: 80, backgroundColor: C.ink, paddingHorizontal: 22, paddingVertical: 12, borderRadius: 30 },

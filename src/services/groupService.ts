@@ -84,32 +84,26 @@ export async function createGroup(name: string, currency: string): Promise<Group
 }
 
 export async function joinGroupByCode(invite_code: string): Promise<Group> {
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Not authenticated')
+  // Look up + join via a SECURITY DEFINER RPC. A non-member can't SELECT the
+  // group by code directly (members-only RLS), so the function does it safely.
+  const { data: groupId, error } = await supabase
+    .rpc('join_group_by_code', { p_code: invite_code.toUpperCase() })
 
-  const { data: group, error: findError } = await supabase
+  if (error) {
+    const msg = (error.message || '').includes('Group not found')
+      ? 'Group not found. Check the invite code and try again.'
+      : error.message
+    throw new Error(msg)
+  }
+
+  // Now a member, so the group is visible under RLS.
+  const { data: group, error: fetchError } = await supabase
     .from('groups')
     .select('*')
-    .eq('invite_code', invite_code.toUpperCase())
+    .eq('id', groupId)
     .single()
 
-  if (findError || !group) throw new Error('Group not found. Check the invite link and try again.')
-
-  const { data: existing } = await supabase
-    .from('group_members')
-    .select('id')
-    .eq('group_id', group.id)
-    .eq('user_id', user.id)
-    .single()
-
-  if (existing) return group
-
-  const { error: joinError } = await supabase
-    .from('group_members')
-    .insert({ group_id: group.id, user_id: user.id })
-
-  if (joinError) throw joinError
-
+  if (fetchError) throw fetchError
   return group
 }
 

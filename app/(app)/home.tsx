@@ -249,6 +249,9 @@ export default function HomeScreen() {
               <TouchableOpacity style={s.addGroupBtn} onPress={openCreate}>
                 <Text style={s.addGroupBtnText}>+ New</Text>
               </TouchableOpacity>
+              <TouchableOpacity style={s.joinGroupBtn} onPress={() => router.push('/(app)/group/join/prompt')}>
+                <Text style={s.joinGroupBtnText}>Join</Text>
+              </TouchableOpacity>
               {groups.length > 0 && (
                 <TouchableOpacity style={s.trashBtn} onPress={enterDeleteMode}>
                   <Text style={s.trashIcon}>🗑</Text>
@@ -478,6 +481,8 @@ const s = StyleSheet.create({
 
   addGroupBtn:     { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 10, backgroundColor: C.lime },
   addGroupBtnText: { fontFamily: PJ7, fontSize: 13, color: C.ink },
+  joinGroupBtn:     { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 10, backgroundColor: C.white, borderWidth: 1.5, borderColor: C.inputBorder },
+  joinGroupBtnText: { fontFamily: PJ7, fontSize: 13, color: C.ink },
 
   trashBtn:  { width: 36, height: 36, borderRadius: 10, backgroundColor: C.white, borderWidth: 1.5, borderColor: C.inputBorder, alignItems: 'center', justifyContent: 'center' },
   trashIcon: { fontSize: 16 },
