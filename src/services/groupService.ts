@@ -153,11 +153,16 @@ export async function updateMemberName(memberId: string, name: string): Promise<
 }
 
 export async function removeMember(memberId: string): Promise<void> {
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from('group_members')
     .delete()
     .eq('id', memberId)
+    .select('id')
   if (error) throw error
+  // A blocked delete returns no error but removes 0 rows — surface that clearly.
+  if (!data || data.length === 0) {
+    throw new Error('Remove failed — no rows removed. Check the group_members DELETE policy/GRANT.')
+  }
 }
 
 export async function deleteGroup(groupId: string): Promise<void> {
