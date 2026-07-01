@@ -38,6 +38,11 @@ const PJ5 = 'PlusJakartaSans_500Medium'
 const PJ6 = 'PlusJakartaSans_600SemiBold'
 const PJ7 = 'PlusJakartaSans_700Bold'
 
+function fmtCur(cur: string, n: number): string {
+  if (cur === 'IDR') return 'Rp ' + Math.round(n).toLocaleString('id-ID')
+  return cur + ' ' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
 const TILE_PALETTE = [
   { bg: '#B7F84A', text: '#14140F' }, { bg: '#FF6B4A', text: '#ffffff' },
   { bg: '#14140F', text: '#B7F84A' }, { bg: '#FEC84B', text: '#14140F' },
@@ -93,12 +98,18 @@ export default function HomeScreen() {
     setRefreshing(false)
   }, [refreshGroups])
 
-  const totalOwed = groups.reduce((s, g) => s + Math.max(g.myBalance, 0), 0)
-  const totalOwe  = groups.reduce((s, g) => s + Math.abs(Math.min(g.myBalance, 0)), 0)
-  const net = totalOwed - totalOwe
+  // Balances are each in their group's own currency — never sum across currencies.
+  const byCurrency: Record<string, { owed: number; owe: number }> = {}
+  groups.forEach(g => {
+    const cur = g.group.currency
+    if (!byCurrency[cur]) byCurrency[cur] = { owed: 0, owe: 0 }
+    if (g.myBalance > 0) byCurrency[cur].owed += g.myBalance
+    else if (g.myBalance < 0) byCurrency[cur].owe += Math.abs(g.myBalance)
+  })
+  const balanceCurrencies = Object.keys(byCurrency).sort()
+  const singleCur = balanceCurrencies.length <= 1 ? (balanceCurrencies[0] ?? 'IDR') : null
 
   const mask = (v: string) => hideBalance ? '••••••' : v
-  const fmtNet = net > 0 ? `+ ${net.toLocaleString()}` : net < 0 ? `− ${Math.abs(net).toLocaleString()}` : '0'
 
   const displayName = user?.display_name ?? ''
   const initial = displayName.charAt(0).toUpperCase()
@@ -159,24 +170,50 @@ export default function HomeScreen() {
           <Text style={s.hidePillText}>{hideBalance ? 'Show' : 'Hide'}</Text>
         </TouchableOpacity>
       </View>
-      <Text style={s.heroAmount}>{mask(fmtNet)}</Text>
-      <View style={s.statPanel}>
-        <View style={s.statCol}>
-          <View style={s.statRow}>
-            <View style={[s.dot, { backgroundColor: C.lime }]} />
-            <Text style={s.statLabel}>Owed to you</Text>
-          </View>
-          <Text style={[s.statAmt, { color: C.lime }]}>{mask(totalOwed.toLocaleString())}</Text>
+
+      {singleCur ? (() => {
+        const bc = byCurrency[singleCur] ?? { owed: 0, owe: 0 }
+        const net = bc.owed - bc.owe
+        const netStr = net > 0 ? `+ ${fmtCur(singleCur, net)}` : net < 0 ? `− ${fmtCur(singleCur, Math.abs(net))}` : fmtCur(singleCur, 0)
+        return (
+          <>
+            <Text style={s.heroAmount}>{mask(netStr)}</Text>
+            <View style={s.statPanel}>
+              <View style={s.statCol}>
+                <View style={s.statRow}>
+                  <View style={[s.dot, { backgroundColor: C.lime }]} />
+                  <Text style={s.statLabel}>Owed to you</Text>
+                </View>
+                <Text style={[s.statAmt, { color: C.lime }]}>{mask(fmtCur(singleCur, bc.owed))}</Text>
+              </View>
+              <View style={s.statDivider} />
+              <View style={s.statCol}>
+                <View style={s.statRow}>
+                  <View style={[s.dot, { backgroundColor: C.coral }]} />
+                  <Text style={s.statLabel}>You owe</Text>
+                </View>
+                <Text style={[s.statAmt, { color: C.coral }]}>{mask(fmtCur(singleCur, bc.owe))}</Text>
+              </View>
+            </View>
+          </>
+        )
+      })() : (
+        <View style={s.multiCurWrap}>
+          {balanceCurrencies.map(cur => {
+            const bc = byCurrency[cur]
+            const net = bc.owed - bc.owe
+            const col = net > 0 ? C.lime : net < 0 ? C.coral : C.white
+            const netStr = net > 0 ? `+ ${fmtCur(cur, net)}` : net < 0 ? `− ${fmtCur(cur, Math.abs(net))}` : fmtCur(cur, 0)
+            return (
+              <View key={cur} style={s.multiCurRow}>
+                <Text style={s.multiCurCode}>{cur}</Text>
+                <Text style={[s.multiCurAmt, { color: col }]}>{mask(netStr)}</Text>
+              </View>
+            )
+          })}
+          <Text style={s.multiCurNote}>Shown per currency — balances in different currencies aren't combined.</Text>
         </View>
-        <View style={s.statDivider} />
-        <View style={s.statCol}>
-          <View style={s.statRow}>
-            <View style={[s.dot, { backgroundColor: C.coral }]} />
-            <Text style={s.statLabel}>You owe</Text>
-          </View>
-          <Text style={[s.statAmt, { color: C.coral }]}>{mask(totalOwe.toLocaleString())}</Text>
-        </View>
-      </View>
+      )}
     </View>
   )
 
@@ -373,9 +410,9 @@ export default function HomeScreen() {
                 <SvgIcon paths={BELL} color={C.ink} size={18} />
                 <View style={s.bellDot} />
               </TouchableOpacity>
-              <View style={s.avatarCircle}>
+              <TouchableOpacity style={s.avatarCircle} onPress={() => router.push('/(app)/profile' as any)}>
                 <Text style={s.avatarText}>{initial}</Text>
-              </View>
+              </TouchableOpacity>
             </View>
           </View>
           {BalanceHero}
@@ -408,9 +445,9 @@ export default function HomeScreen() {
               <Text style={{ fontSize: 16 }}>🔔</Text>
               <View style={s.bellDot} />
             </TouchableOpacity>
-            <View style={s.avatarCircle}>
+            <TouchableOpacity style={s.avatarCircle} onPress={() => router.push('/(app)/profile' as any)}>
               <Text style={s.avatarText}>{initial}</Text>
-            </View>
+            </TouchableOpacity>
           </View>
         </View>
 
@@ -474,6 +511,11 @@ const s = StyleSheet.create({
   dot:          { width: 8, height: 8, borderRadius: 4 },
   statLabel:    { fontFamily: PJ6, fontSize: 12, color: C.onDark },
   statAmt:      { fontFamily: SG7, fontSize: 19 },
+  multiCurWrap: { gap: 12, marginTop: 2 },
+  multiCurRow:  { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' },
+  multiCurCode: { fontFamily: PJ7, fontSize: 15, color: C.white },
+  multiCurAmt:  { fontFamily: SG7, fontSize: 24, letterSpacing: -0.4 },
+  multiCurNote: { fontFamily: PJ5, fontSize: 11, color: C.onDark, marginTop: 6, lineHeight: 15 },
   statDivider:  { width: 1, backgroundColor: 'rgba(255,255,255,.1)', marginVertical: 6 },
 
   groupsHeader:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 },
