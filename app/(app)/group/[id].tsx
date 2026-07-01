@@ -447,10 +447,13 @@ export default function GroupDetailScreen() {
           const fxLine = showFx
             ? `≈ ${fmtAmt(Number(exp.amount_in_group_currency ?? exp.total_amount), group.currency)}`
             : null
-          const onPress = () => router.push({
-            pathname: '/(app)/expense/new',
-            params: { groupId: id, expenseId: exp.id },
-          })
+          // Scan (itemized) expenses re-open in the itemized split editor;
+          // manual ones open in the manual form.
+          const onPress = () => router.push(
+            exp.itemization
+              ? { pathname: '/(app)/expense/review', params: { groupId: id, expenseId: exp.id } }
+              : { pathname: '/(app)/expense/new', params: { groupId: id, expenseId: exp.id } }
+          )
 
           if (isWide) {
             return (

@@ -1,13 +1,15 @@
 import { useState, useEffect } from 'react'
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
-  ScrollView, Image, ActivityIndicator,
+  ScrollView, Image, ActivityIndicator, Platform, Alert,
 } from 'react-native'
 import { router, useLocalSearchParams } from 'expo-router'
 import { Colors, Radii, Spacing, Shadows } from '../../../src/theme'
 import { Toast } from '../../../src/components/Toast'
 import { getGroupMembers, getGroupById, getMemberDisplayName } from '../../../src/services/groupService'
-import { createExpenseWithSplits } from '../../../src/services/expenseService'
+import {
+  createExpenseWithSplits, updateExpenseWithSplits, getExpenseById, deleteExpense,
+} from '../../../src/services/expenseService'
 import { getExchangeRate } from '../../../src/services/ratesService'
 import { supabase } from '../../../src/lib/supabase'
 import { ExpenseCategory } from '../../../src/types/database'
@@ -33,10 +35,11 @@ function fmtMoney(currency: string, n: number): string {
 export default function ReviewScreen() {
   const params = useLocalSearchParams<{
     groupId: string
+    expenseId?: string
     title?: string
     category?: string
     currency?: string
-    ocrItems: string
+    ocrItems?: string
     ocrTax?: string
     ocrService?: string
     ocrDiscount?: string
@@ -45,8 +48,11 @@ export default function ReviewScreen() {
     receiptImageUrl?: string
   }>()
 
+  const isEditing = !!params.expenseId
+
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   const [toast, setToast] = useState('')
   const [members, setMembers] = useState<any[]>([])
   const [groupCurrency, setGroupCurrency] = useState('IDR')
@@ -59,8 +65,11 @@ export default function ReviewScreen() {
   const [discount, setDiscount] = useState(params.ocrDiscount ?? '0')
   const [rate, setRate] = useState('1')
   const [rateStatus, setRateStatus] = useState<'loading' | 'live' | 'fallback' | 'manual' | 'failed' | null>(null)
+  const [currency, setCurrency] = useState(params.ocrCurrency || params.currency || 'IDR')
+  const [category, setCategory] = useState<ExpenseCategory>((params.category as ExpenseCategory) || 'Food')
+  const [receiptUrl, setReceiptUrl] = useState<string | null>(params.receiptImageUrl || null)
+  const [date, setDate] = useState(() => new Date().toISOString().split('T')[0])
 
-  const currency = params.ocrCurrency || params.currency || 'IDR'
   const isGroupCur = currency === groupCurrency
   const rateNum = isGroupCur ? 1 : (parseFloat(rate) || 0)
 
@@ -83,27 +92,52 @@ export default function ReviewScreen() {
         const on0: Record<string, boolean> = {}
         mems.forEach((m: any) => { on0[m.id] = true })
 
-        const parsed = JSON.parse(params.ocrItems ?? '[]') as { name: string; amount: number }[]
-        const its: ItemDraft[] = (parsed.length ? parsed : [{ name: '', amount: 0 }]).map(i => ({
-          name: i.name,
-          amount: String(i.amount),
-          on: { ...on0 },
-        }))
-        setItems(its)
-
-        const myId = user ? mems.find((m: any) => m.user?.id === user.id)?.id : null
-        setPaidBy(myId ?? (mems.length > 0 ? mems[0].id : null))
+        if (params.expenseId) {
+          // Edit mode — reload the stored itemization.
+          const exp = await getExpenseById(params.expenseId)
+          const it = exp.itemization || {}
+          setTitle(exp.title ?? '')
+          setPaidBy(exp.paid_by ?? null)
+          setCategory((exp.category as ExpenseCategory) || 'Food')
+          setCurrency(it.currency || exp.currency || grp.currency)
+          setRate(it.rate != null ? String(it.rate)
+            : exp.exchange_rate_to_group_currency != null ? String(exp.exchange_rate_to_group_currency) : '1')
+          setTax(String(it.tax ?? 0))
+          setService(String(it.service ?? 0))
+          setDiscount(String(it.discount ?? 0))
+          setReceiptUrl(exp.receipt_image_url ?? null)
+          setDate((exp.date ?? exp.created_at)?.split('T')[0] ?? date)
+          const storedItems: ItemDraft[] = (it.items ?? []).map((i: any) => ({
+            name: i.name ?? '',
+            amount: String(i.amount ?? ''),
+            on: Object.fromEntries((i.assignees ?? []).map((mid: string) => [mid, true])),
+          }))
+          setItems(storedItems.length ? storedItems : [{ name: '', amount: '', on: { ...on0 } }])
+        } else {
+          // Create mode — from the OCR result.
+          const parsed = JSON.parse(params.ocrItems ?? '[]') as { name: string; amount: number }[]
+          const its: ItemDraft[] = (parsed.length ? parsed : [{ name: '', amount: 0 }]).map(i => ({
+            name: i.name,
+            amount: String(i.amount),
+            on: { ...on0 },
+          }))
+          setItems(its)
+          const myId = user ? mems.find((m: any) => m.user?.id === user.id)?.id : null
+          setPaidBy(myId ?? (mems.length > 0 ? mems[0].id : null))
+        }
       } catch (e: any) {
-        showToast(e.message ?? 'Could not load the group')
+        showToast(e.message ?? 'Could not load')
       } finally {
         setLoading(false)
       }
     }
     load()
-  }, [params.groupId])
+  }, [params.groupId, params.expenseId])
 
   // Auto-fetch the FX rate when the receipt currency differs from the group's.
+  // Skip in edit mode so the saved rate isn't clobbered.
   useEffect(() => {
+    if (isEditing) return
     if (!groupCurrency || currency === groupCurrency) { setRateStatus(null); return }
     let cancelled = false
     setRateStatus('loading')
@@ -176,24 +210,59 @@ export default function ReviewScreen() {
       .filter(s => s.amount > 0)
     if (splits.length === 0) { showToast('No one is assigned to any item.'); return }
 
+    // Persist the itemization so this expense re-opens in this editor.
+    const itemization = {
+      items: valid.map(i => ({
+        name: i.name.trim(),
+        amount: Number(i.amount),
+        assignees: members.filter(m => i.on[m.id]).map(m => m.id),
+      })),
+      tax: taxN, service: serviceN, discount: discountN,
+      currency, rate: rateNum,
+    }
+    const input = {
+      groupId: params.groupId,
+      paidBy,
+      title: title.trim(),
+      totalAmount: grandTotal,
+      currency,
+      exchangeRateToGroupCurrency: isGroupCur ? null : rateNum,
+      amountInGroupCurrency: grandTotal * rateNum,
+      category,
+      date,
+      receiptImageUrl: params.receiptImageUrl || undefined,
+      itemization,
+    }
+
     setSaving(true)
     try {
-      await createExpenseWithSplits({
-        groupId: params.groupId,
-        paidBy,
-        title: title.trim(),
-        totalAmount: grandTotal,
-        currency,
-        exchangeRateToGroupCurrency: isGroupCur ? null : rateNum,
-        amountInGroupCurrency: grandTotal * rateNum,
-        category: (params.category as ExpenseCategory) || 'Food',
-        date: new Date().toISOString().split('T')[0],
-        receiptImageUrl: params.receiptImageUrl || undefined,
-      }, splits)
+      if (isEditing) await updateExpenseWithSplits(params.expenseId!, input, splits)
+      else await createExpenseWithSplits(input, splits)
       router.replace(`/(app)/group/${params.groupId}`)
     } catch (e: any) {
       showToast(e.message ?? 'Could not save')
       setSaving(false)
+    }
+  }
+
+  async function handleDelete() {
+    if (!params.expenseId) return
+    const confirmed = Platform.OS === 'web'
+      ? (typeof window !== 'undefined' && window.confirm('Delete this expense? This cannot be undone.'))
+      : await new Promise<boolean>(resolve => {
+          Alert.alert('Delete expense', 'This cannot be undone.', [
+            { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+            { text: 'Delete', style: 'destructive', onPress: () => resolve(true) },
+          ])
+        })
+    if (!confirmed) return
+    setDeleting(true)
+    try {
+      await deleteExpense(params.expenseId)
+      router.replace(`/(app)/group/${params.groupId}`)
+    } catch (e: any) {
+      showToast(e.message ?? 'Could not delete')
+      setDeleting(false)
     }
   }
 
@@ -214,12 +283,12 @@ export default function ReviewScreen() {
             <Text style={s.backArrow}>←</Text>
           </TouchableOpacity>
           <View>
-            <Text style={s.screenTitle}>REVIEW & SPLIT</Text>
+            <Text style={s.screenTitle}>{isEditing ? 'EDIT SPLIT' : 'REVIEW & SPLIT'}</Text>
             <Text style={s.screenSub}>Assign each item, then split & save</Text>
           </View>
         </View>
 
-        {!!params.receiptImageUrl && <Image source={{ uri: params.receiptImageUrl }} style={s.thumb} />}
+        {!!receiptUrl && <Image source={{ uri: receiptUrl }} style={s.thumb} />}
 
         {/* Title */}
         <Text style={s.label}>TITLE</Text>
@@ -368,9 +437,14 @@ export default function ReviewScreen() {
       </ScrollView>
 
       {/* Sticky save */}
-      <View style={s.stickyBar}>
-        <TouchableOpacity style={[s.saveBtn, saving && { opacity: 0.6 }]} onPress={handleSave} disabled={saving}>
-          {saving ? <ActivityIndicator color={Colors.ink} /> : <Text style={s.saveBtnText}>Save expense</Text>}
+      <View style={[s.stickyBar, isEditing && s.stickyBarRow]}>
+        {isEditing && (
+          <TouchableOpacity style={[s.deleteBtn, deleting && { opacity: 0.6 }]} onPress={handleDelete} disabled={deleting || saving}>
+            {deleting ? <ActivityIndicator color={Colors.coral} /> : <Text style={s.deleteBtnText}>Delete</Text>}
+          </TouchableOpacity>
+        )}
+        <TouchableOpacity style={[s.saveBtn, isEditing && { flex: 1 }, saving && { opacity: 0.6 }]} onPress={handleSave} disabled={saving || deleting}>
+          {saving ? <ActivityIndicator color={Colors.ink} /> : <Text style={s.saveBtnText}>{isEditing ? 'Save changes' : 'Save expense'}</Text>}
         </TouchableOpacity>
       </View>
     </View>
@@ -436,6 +510,9 @@ const s = StyleSheet.create({
   mismatch: { fontFamily: 'PlusJakartaSans_500Medium', fontSize: 12, color: Colors.coral, marginTop: 2, lineHeight: 17 },
 
   stickyBar: { position: 'absolute', bottom: 0, left: 0, right: 0, padding: Spacing.screenH, paddingBottom: 36, backgroundColor: Colors.surface, borderTopWidth: 1, borderTopColor: Colors.borderLight },
+  stickyBarRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   saveBtn: { backgroundColor: Colors.lime, borderRadius: 18, padding: 18, alignItems: 'center', ...Shadows.limeButton },
   saveBtnText: { fontFamily: 'SpaceGrotesk_700Bold', fontSize: 16, color: Colors.ink },
+  deleteBtn: { paddingVertical: 18, paddingHorizontal: 22, borderRadius: 18, borderWidth: 1.5, borderColor: Colors.coral, backgroundColor: Colors.card, alignItems: 'center', justifyContent: 'center' },
+  deleteBtnText: { fontFamily: 'SpaceGrotesk_700Bold', fontSize: 15, color: Colors.coral },
 })

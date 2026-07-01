@@ -62,6 +62,9 @@ export interface CreateItemizedExpenseInput {
   category: ExpenseCategory
   date: string
   receiptImageUrl?: string
+  // The full itemization (items + assignees + charges), so the expense can be
+  // re-edited in the itemized editor. Its presence marks the expense as a scan.
+  itemization: any
 }
 
 // Like createSimpleExpense, but with explicit per-member split amounts (already in
@@ -84,6 +87,7 @@ export async function createExpenseWithSplits(
       category: input.category,
       date: input.date,
       receipt_image_url: input.receiptImageUrl ?? null,
+      itemization: input.itemization ?? null,
     })
     .select()
     .single()
@@ -94,6 +98,54 @@ export async function createExpenseWithSplits(
     .filter((s) => s.amount > 0)
     .map((s) => ({
       expense_id: expense.id,
+      user_id: s.memberId,
+      amount_owed: Math.round(s.amount * 100) / 100,
+      is_settled: false,
+    }))
+  if (rows.length > 0) {
+    const { error: splitError } = await supabase.from('expense_splits').insert(rows)
+    if (splitError) throw splitError
+  }
+
+  return expense
+}
+
+// Edit an itemized (scan) expense: update the row, replace its splits, and
+// re-store the itemization so the editor round-trips.
+export async function updateExpenseWithSplits(
+  expenseId: string,
+  input: CreateItemizedExpenseInput,
+  splits: { memberId: string; amount: number }[],
+): Promise<Expense> {
+  const { data: expense, error } = await supabase
+    .from('expenses')
+    .update({
+      paid_by: input.paidBy,
+      title: input.title,
+      total_amount: input.totalAmount,
+      currency: input.currency,
+      exchange_rate_to_group_currency: input.exchangeRateToGroupCurrency,
+      amount_in_group_currency: input.amountInGroupCurrency,
+      category: input.category,
+      date: input.date,
+      itemization: input.itemization ?? null,
+    })
+    .eq('id', expenseId)
+    .select()
+    .single()
+
+  if (error) throw error
+
+  const { error: delError } = await supabase
+    .from('expense_splits')
+    .delete()
+    .eq('expense_id', expenseId)
+  if (delError) throw delError
+
+  const rows = splits
+    .filter((s) => s.amount > 0)
+    .map((s) => ({
+      expense_id: expenseId,
       user_id: s.memberId,
       amount_owed: Math.round(s.amount * 100) / 100,
       is_settled: false,
