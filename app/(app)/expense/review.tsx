@@ -314,6 +314,38 @@ export default function ReviewScreen() {
           })}
         </View>
 
+        {/* Date */}
+        <Text style={[s.label, { marginTop: 20 }]}>DATE</Text>
+        {Platform.OS === 'web' ? (
+          (() => {
+            const El: any = 'input'
+            return (
+              <El
+                type="date"
+                value={date}
+                onChange={(e: any) => setDate(e.target.value)}
+                style={{
+                  paddingLeft: 16, paddingRight: 16, paddingTop: 13, paddingBottom: 13,
+                  border: `1.5px solid ${Colors.border}`,
+                  borderRadius: Radii.input, backgroundColor: Colors.card,
+                  fontFamily: 'PlusJakartaSans_500Medium', fontSize: 15,
+                  color: Colors.ink, cursor: 'pointer', outline: 'none',
+                  width: '100%', boxSizing: 'border-box',
+                }}
+              />
+            )
+          })()
+        ) : (
+          <TextInput
+            style={s.input}
+            value={date}
+            onChangeText={setDate}
+            placeholder="YYYY-MM-DD"
+            placeholderTextColor="#A8A296"
+            keyboardType="numeric"
+          />
+        )}
+
         {/* Exchange rate (cross-currency only) */}
         {!isGroupCur && (
           <View style={s.rateRow}>
