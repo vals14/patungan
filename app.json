@@ -3,6 +3,9 @@
     "name": "Patungan",
     "slug": "patungan",
     "version": "1.0.0",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
     "scheme": "patungan",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
