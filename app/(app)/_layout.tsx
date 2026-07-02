@@ -62,7 +62,7 @@ function WebSidebar() {
           <SvgIcon paths={ICO.home} color={isHome ? C.ink : '#A39C8B'} />
           <Text style={[s.navText, isHome && { color: C.ink, fontFamily: PJ7 }]}>Home</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={s.navItem}>
+        <TouchableOpacity style={s.navItem} onPress={() => router.push('/(app)/activity' as any)}>
           <SvgIcon paths={ICO.activity} color="#A39C8B" />
           <Text style={s.navText}>Activity</Text>
         </TouchableOpacity>
