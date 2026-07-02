@@ -466,7 +466,7 @@ export default function HomeScreen() {
             <Text style={s.fabText}>+</Text>
           </TouchableOpacity>
         </View>
-        <TouchableOpacity style={s.navTabBtn}>
+        <TouchableOpacity style={s.navTabBtn} onPress={() => router.push('/(app)/activity' as any)}>
           <View style={s.navRing} />
           <Text style={s.navTabText}>Activity</Text>
         </TouchableOpacity>
