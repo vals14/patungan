@@ -3,6 +3,7 @@ import {
   Animated, TouchableWithoutFeedback,
   View, StyleSheet, KeyboardAvoidingView, Platform,
 } from 'react-native'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Colors, Radii } from '../theme'
 
 interface Props {
@@ -12,6 +13,7 @@ interface Props {
 }
 
 export function Sheet({ visible, onClose, children }: Props) {
+  const insets = useSafeAreaInsets()
   const translateY = useRef(new Animated.Value(500)).current
   const opacity = useRef(new Animated.Value(0)).current
 
@@ -41,7 +43,7 @@ export function Sheet({ visible, onClose, children }: Props) {
         style={s.wrapper}
         pointerEvents="box-none"
       >
-        <Animated.View style={[s.sheet, { transform: [{ translateY }] }]}>
+        <Animated.View style={[s.sheet, { paddingBottom: Math.max(insets.bottom, 20) + 20 }, { transform: [{ translateY }] }]}>
           <View style={s.handle} />
           {children}
         </Animated.View>

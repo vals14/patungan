@@ -4,6 +4,7 @@ import {
   ScrollView, Image, ActivityIndicator, Platform, Alert,
 } from 'react-native'
 import { router, useLocalSearchParams } from 'expo-router'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Colors, Radii, Spacing, Shadows } from '../../../src/theme'
 import { Toast } from '../../../src/components/Toast'
 import { getGroupMembers, getGroupById, getMemberDisplayName } from '../../../src/services/groupService'
@@ -49,6 +50,7 @@ export default function ReviewScreen() {
   }>()
 
   const isEditing = !!params.expenseId
+  const insets = useSafeAreaInsets()
 
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -469,7 +471,7 @@ export default function ReviewScreen() {
       </ScrollView>
 
       {/* Sticky save */}
-      <View style={[s.stickyBar, isEditing && s.stickyBarRow]}>
+      <View style={[s.stickyBar, isEditing && s.stickyBarRow, { paddingBottom: Math.max(insets.bottom, 16) + 20 }]}>
         {isEditing && (
           <TouchableOpacity style={[s.deleteBtn, deleting && { opacity: 0.6 }]} onPress={handleDelete} disabled={deleting || saving}>
             {deleting ? <ActivityIndicator color={Colors.coral} /> : <Text style={s.deleteBtnText}>Delete</Text>}

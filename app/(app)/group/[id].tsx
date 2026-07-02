@@ -20,6 +20,7 @@ import {
 } from '../../../src/services/settlementService'
 import { SettleSheet } from '../../../src/components/SettleSheet'
 import { supabase } from '../../../src/lib/supabase'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
 const C = {
@@ -99,6 +100,7 @@ export default function GroupDetailScreen() {
   const { user, signOut } = useAuth()
   const { width } = useWindowDimensions()
   const isWide = width >= 900
+  const insets = useSafeAreaInsets()
 
   const { refresh: refreshGroups } = useGroups()
 
@@ -691,7 +693,7 @@ export default function GroupDetailScreen() {
 
         {/* Add expense bar (expenses tab only) */}
         {activeTab === 'expenses' && (
-          <View style={s.addExpenseBar}>
+          <View style={[s.addExpenseBar, { paddingBottom: Math.max(insets.bottom, 12) + 16 }]}>
             <TouchableOpacity style={s.addExpenseBtn} onPress={() => router.push({ pathname: '/(app)/expense/new', params: { groupId: id } })}>
               <Text style={s.addExpenseBtnText}>+ Add expense</Text>
             </TouchableOpacity>

@@ -4,6 +4,7 @@ import {
   TextInput, ActivityIndicator, useWindowDimensions, Platform, Alert,
 } from 'react-native'
 import { router, useLocalSearchParams } from 'expo-router'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Colors, Radii, Spacing, Shadows } from '../../../src/theme'
 import { Avatar } from '../../../src/components/Avatar'
 import { Toast } from '../../../src/components/Toast'
@@ -59,6 +60,7 @@ export default function NewExpenseScreen() {
   const { groups, refresh } = useGroups()
   const { width } = useWindowDimensions()
   const isWide = width >= 900
+  const insets = useSafeAreaInsets()
 
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -535,7 +537,7 @@ export default function NewExpenseScreen() {
       </ScrollView>
 
       {/* ── Save bar ─────────────────────────────────────────── */}
-      <View style={[s.saveBar, !isWide && isEditing && s.saveBarRow, isWide && s.saveBarWide]}>
+      <View style={[s.saveBar, !isWide && isEditing && s.saveBarRow, isWide && s.saveBarWide, !isWide && { paddingBottom: Math.max(insets.bottom, 16) + 20 }]}>
         {isEditing && (
           <TouchableOpacity
             style={[s.deleteBtn, deleting && s.saveBtnDim]}
