@@ -59,10 +59,14 @@ sideload on iOS.
 For **JS / UI / feature** changes (most of what we build), publish an OTA update —
 testers just reopen the app:
 ```bash
-npx eas-cli@latest update --channel preview --message "what changed"
+npx eas-cli@latest update --channel preview --environment preview --message "what changed"
 ```
-Builds made with the `preview` profile pull from the `preview` channel, so everyone
-on that build gets it.
+- `--channel preview` = which builds receive it; **must match the build's channel**
+  (your `preview` APK), or the update reaches nobody.
+- `--environment preview` = which EAS env vars (your Supabase keys) get bundled in.
+
+Keep everything on `preview` for testing. Only use `--channel production
+--environment production` once you ship a real app-store release.
 
 **When you need a NEW build instead of an update:** you added or upgraded a *native*
 module (a new `expo-*` package with native code), or changed `app.json` native config
