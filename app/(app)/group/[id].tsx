@@ -19,6 +19,7 @@ import {
   getSettlements, recordSettlement, undoSettlement, PayMethod,
 } from '../../../src/services/settlementService'
 import { SettleSheet } from '../../../src/components/SettleSheet'
+import { supabase } from '../../../src/lib/supabase'
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
 const C = {
@@ -159,6 +160,22 @@ export default function GroupDetailScreen() {
 
   // Refetch whenever the screen regains focus (e.g. returning from Add expense).
   useFocusEffect(useCallback(() => { loadData() }, [loadData]))
+
+  // Live updates: refetch when this group's expenses / settlements / members
+  // change (e.g. another member adds an expense), so everyone stays in sync
+  // without a manual refresh. Requires Realtime enabled on those tables
+  // (migration 0011); if it isn't, this simply never fires and focus-refetch
+  // still covers it.
+  useEffect(() => {
+    if (!id) return
+    const channel = supabase
+      .channel(`group-${id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'expenses', filter: `group_id=eq.${id}` }, () => loadData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'settlements', filter: `group_id=eq.${id}` }, () => loadData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'group_members', filter: `group_id=eq.${id}` }, () => loadData())
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [id, loadData])
 
   function flash(msg: string) {
     setToast(msg)
