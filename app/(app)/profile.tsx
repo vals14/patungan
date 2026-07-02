@@ -1,20 +1,42 @@
 import { useState } from 'react'
 import {
-  View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, Platform,
+  View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, Platform,
 } from 'react-native'
 import { router } from 'expo-router'
 import Constants from 'expo-constants'
 import { useAuth } from '../../src/context/AuthContext'
+import { Toast } from '../../src/components/Toast'
 import { Colors, Radii, Spacing } from '../../src/theme'
 
 export default function ProfileScreen() {
-  const { user, session, signOut } = useAuth()
+  const { user, session, signOut, updateDisplayName } = useAuth()
   const [signingOut, setSigningOut] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [nameInput, setNameInput] = useState('')
+  const [savingName, setSavingName] = useState(false)
+  const [toast, setToast] = useState('')
 
   const name = user?.display_name ?? 'You'
   const email = session?.user?.email ?? user?.email ?? ''
   const initial = name.charAt(0).toUpperCase()
   const version = Constants.expoConfig?.version ?? '1.0.0'
+
+  function showToast(m: string) { setToast(m); setTimeout(() => setToast(''), 2400) }
+
+  function startEdit() {
+    setNameInput(user?.display_name ?? '')
+    setEditing(true)
+  }
+
+  async function saveName() {
+    if (!nameInput.trim()) { showToast('Name cannot be empty'); return }
+    setSavingName(true)
+    const { error } = await updateDisplayName(nameInput)
+    setSavingName(false)
+    if (error) { showToast(error); return }
+    setEditing(false)
+    showToast('Name updated')
+  }
 
   async function handleSignOut() {
     const ok = Platform.OS === 'web'
@@ -37,6 +59,8 @@ export default function ProfileScreen() {
 
   return (
     <View style={styles.container}>
+      <Toast message={toast} visible={!!toast} onHide={() => setToast('')} />
+
       <View style={styles.header}>
         <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
           <Text style={styles.backArrow}>←</Text>
@@ -52,7 +76,35 @@ export default function ProfileScreen() {
         <View style={styles.card}>
           <View style={styles.row}>
             <Text style={styles.rowLabel}>Name</Text>
-            <Text style={styles.rowValue} numberOfLines={1}>{name}</Text>
+            {editing ? (
+              <View style={styles.editWrap}>
+                <TextInput
+                  style={styles.editInput}
+                  value={nameInput}
+                  onChangeText={setNameInput}
+                  placeholder="Your name"
+                  placeholderTextColor="#A8A296"
+                  autoFocus
+                  onSubmitEditing={saveName}
+                  returnKeyType="done"
+                />
+                <TouchableOpacity style={styles.saveBtn} onPress={saveName} disabled={savingName}>
+                  {savingName
+                    ? <ActivityIndicator color={Colors.ink} size="small" />
+                    : <Text style={styles.saveBtnText}>Save</Text>}
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.cancelBtn} onPress={() => setEditing(false)}>
+                  <Text style={styles.cancelBtnText}>✕</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <View style={styles.rowRight}>
+                <Text style={styles.rowValue} numberOfLines={1}>{name}</Text>
+                <TouchableOpacity onPress={startEdit} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                  <Text style={styles.editLink}>Edit</Text>
+                </TouchableOpacity>
+              </View>
+            )}
           </View>
           <View style={styles.divider} />
           <View style={styles.row}>
@@ -87,10 +139,19 @@ const styles = StyleSheet.create({
   email: { fontFamily: 'PlusJakartaSans_500Medium', fontSize: 14, color: Colors.textMuted, marginTop: 4 },
 
   card: { alignSelf: 'stretch', backgroundColor: Colors.card, borderRadius: Radii.card, borderWidth: 1, borderColor: Colors.borderLight, paddingHorizontal: 16, marginTop: 32 },
-  row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 16, paddingVertical: 15 },
+  row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 16, paddingVertical: 15, minHeight: 54 },
   rowLabel: { fontFamily: 'PlusJakartaSans_600SemiBold', fontSize: 14, color: Colors.textMuted },
+  rowRight: { flexDirection: 'row', alignItems: 'center', gap: 12, flexShrink: 1 },
   rowValue: { fontFamily: 'PlusJakartaSans_700Bold', fontSize: 14, color: Colors.ink, flexShrink: 1 },
+  editLink: { fontFamily: 'PlusJakartaSans_700Bold', fontSize: 13, color: Colors.positive },
   divider: { height: 1, backgroundColor: Colors.borderLight },
+
+  editWrap: { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1, marginLeft: 16 },
+  editInput: { flex: 1, backgroundColor: Colors.surface, borderWidth: 1.5, borderColor: Colors.border, borderRadius: Radii.input, paddingHorizontal: 12, paddingVertical: 8, fontFamily: 'PlusJakartaSans_600SemiBold', fontSize: 14, color: Colors.ink },
+  saveBtn: { backgroundColor: Colors.lime, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 9, alignItems: 'center', justifyContent: 'center' },
+  saveBtnText: { fontFamily: 'SpaceGrotesk_700Bold', fontSize: 13, color: Colors.ink },
+  cancelBtn: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
+  cancelBtnText: { fontFamily: 'PlusJakartaSans_600SemiBold', fontSize: 14, color: Colors.textMuted },
 
   signOutBtn: { alignSelf: 'stretch', marginTop: 24, paddingVertical: 16, borderRadius: 16, borderWidth: 1.5, borderColor: Colors.coral, backgroundColor: Colors.card, alignItems: 'center' },
   signOutText: { fontFamily: 'SpaceGrotesk_700Bold', fontSize: 15, color: Colors.coral },

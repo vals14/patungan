@@ -20,6 +20,7 @@ interface AuthContextType {
   signInAsGuest: () => Promise<{ error: string | null }>
   forgotPassword: (email: string) => Promise<{ error: string | null }>
   signOut: () => Promise<void>
+  updateDisplayName: (name: string) => Promise<{ error: string | null }>
 }
 
 const AuthContext = createContext<AuthContextType | null>(null)
@@ -145,12 +146,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null)
   }
 
+  async function updateDisplayName(name: string) {
+    if (!user) return { error: 'Not signed in' }
+    const trimmed = name.trim()
+    if (!trimmed) return { error: 'Name cannot be empty' }
+    const { error } = await supabase.from('users').update({ display_name: trimmed }).eq('id', user.id)
+    if (error) return { error: error.message }
+    setUser({ ...user, display_name: trimmed })
+    return { error: null }
+  }
+
   return (
     <AuthContext.Provider value={{
       session, user, loading,
       signInWithEmail, signUpWithEmail, signInWithGoogle,
       signInWithPhone, verifyOtp, signInAsGuest,
-      forgotPassword, signOut,
+      forgotPassword, signOut, updateDisplayName,
     }}>
       {children}
     </AuthContext.Provider>
