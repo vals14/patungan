@@ -5,6 +5,7 @@ import {
   RefreshControl, useWindowDimensions, Platform,
 } from 'react-native'
 import { router } from 'expo-router'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useAuth } from '../../src/context/AuthContext'
 import { useGroups } from '../../src/context/GroupsContext'
 import { createGroup, deleteGroup, GroupWithBalance } from '../../src/services/groupService'
@@ -72,6 +73,7 @@ export default function HomeScreen() {
   const { user } = useAuth()
   const { groups: contextGroups, loading, refresh: refreshGroups } = useGroups()
   const { width } = useWindowDimensions()
+  const insets = useSafeAreaInsets()
   const isWide = width >= 900
 
   const [refreshing, setRefreshing] = useState(false)
@@ -456,7 +458,7 @@ export default function HomeScreen() {
         <View style={{ height: 16 }} />
       </ScrollView>
 
-      <View style={s.bottomNav}>
+      <View style={[s.bottomNav, { paddingBottom: Math.max(insets.bottom, 10) + 12 }]}>
         <TouchableOpacity style={s.navTabBtn}>
           <View style={[s.navIcon, { backgroundColor: C.ink }]} />
           <Text style={[s.navTabText, { color: C.ink }]}>Home</Text>

@@ -13,6 +13,7 @@ import {
   PlusJakartaSans_700Bold,
 } from '@expo-google-fonts/plus-jakarta-sans'
 import * as SplashScreen from 'expo-splash-screen'
+import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { AuthProvider } from '../src/context/AuthContext'
 
 SplashScreen.preventAutoHideAsync()
@@ -35,8 +36,10 @@ export default function RootLayout() {
   if (!fontsLoaded) return null
 
   return (
-    <AuthProvider>
-      <Slot />
-    </AuthProvider>
+    <SafeAreaProvider>
+      <AuthProvider>
+        <Slot />
+      </AuthProvider>
+    </SafeAreaProvider>
   )
 }
