@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   TextInput, ActivityIndicator, useWindowDimensions, Platform, Alert,
+  KeyboardAvoidingView,
 } from 'react-native'
 import { router, useLocalSearchParams } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -81,6 +82,9 @@ export default function NewExpenseScreen() {
   const [date, setDate] = useState(() => new Date().toISOString().split('T')[0])
   const [paidBy, setPaidBy] = useState<string | null>(null)
   const [splitBetween, setSplitBetween] = useState<Record<string, boolean>>({})
+  const [splitMode, setSplitMode] = useState<'equal' | 'manual'>('equal')
+  // Manual per-member amounts, entered in the expense's own currency (like `amount`).
+  const [manualAmounts, setManualAmounts] = useState<Record<string, string>>({})
   // Signed receipt URL carried in from the scan path; persisted on save. Null for manual entry.
   const [receiptImageUrl] = useState<string | null>(params.receiptImageUrl || null)
   // FX rate fetch status, shown next to the editable rate field.
@@ -97,6 +101,9 @@ export default function NewExpenseScreen() {
   const amountInGroup = amountNum * effectiveRate
   const splitIds = Object.entries(splitBetween).filter(([, on]) => on).map(([id]) => id)
   const shareEach = splitIds.length ? amountNum / splitIds.length : 0
+  const manualTotal = splitIds.reduce((sum, id) => sum + (parseFloat(manualAmounts[id]) || 0), 0)
+  const manualDiff = amountNum - manualTotal
+  const manualMatched = Math.abs(manualDiff) < 0.01
 
   // Default the expense currency to the group's currency once the group loads.
   // Skip when editing (the loaded expense carries its own currency) and when the
@@ -133,6 +140,28 @@ export default function NewExpenseScreen() {
     return () => { cancelled = true }
   }, [currency, groupCurrency, date, isEditing])
 
+  // In manual mode, seed a starting value (equal share) for any selected member
+  // that doesn't have one yet — never touches amounts the user already typed.
+  useEffect(() => {
+    if (splitMode !== 'manual') return
+    setManualAmounts(prev => {
+      let changed = false
+      const next = { ...prev }
+      splitIds.forEach(id => {
+        if (next[id] === undefined) {
+          next[id] = shareEach > 0 ? String(Math.round(shareEach * 100) / 100) : '0'
+          changed = true
+        }
+      })
+      return changed ? next : prev
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [splitMode, splitIds.join(',')])
+
+  function setManualAmount(memberId: string, text: string) {
+    setManualAmounts(prev => ({ ...prev, [memberId]: text.replace(/[^\d.]/g, '') }))
+  }
+
   function showToast(msg: string) {
     setToast(msg)
     setTimeout(() => setToast(''), 2400)
@@ -157,9 +186,27 @@ export default function NewExpenseScreen() {
           setCategory(exp.category)
           setDate((exp.date ?? exp.created_at)?.split('T')[0])
           setPaidBy(exp.paid_by)
+          const splits = exp.expense_splits ?? []
           const split: Record<string, boolean> = {}
-          ;(exp.expense_splits ?? []).forEach((sp: any) => { split[sp.user_id] = true })
+          splits.forEach((sp: any) => { split[sp.user_id] = true })
           setSplitBetween(split)
+
+          // Detect whether the stored splits were an equal division or a manual
+          // one, so re-opening the editor lands back on the right mode.
+          const rateAtLoad = exp.exchange_rate_to_group_currency || 1
+          const equalShareGroup = splits.length ? exp.amount_in_group_currency / splits.length : 0
+          const isManual = splits.some((sp: any) =>
+            Math.abs(sp.amount_owed - equalShareGroup) > Math.max(1, equalShareGroup * 0.01)
+          )
+          if (isManual) {
+            setSplitMode('manual')
+            const manualInit: Record<string, string> = {}
+            splits.forEach((sp: any) => {
+              const amtInExpenseCur = sp.amount_owed / rateAtLoad
+              manualInit[sp.user_id] = String(Math.round(amtInExpenseCur * 100) / 100)
+            })
+            setManualAmounts(manualInit)
+          }
         } else {
           // Create mode — split between everyone, default payer to me.
           const initSplit: Record<string, boolean> = {}
@@ -201,9 +248,13 @@ export default function NewExpenseScreen() {
     if (!paidBy) { showToast('Select who paid'); return }
     if (!splitIds.length) { showToast('Select who to split between'); return }
     if (!isGroupCurrency && !(parseFloat(rate) > 0)) { showToast('Enter a valid exchange rate'); return }
+    if (splitMode === 'manual' && !manualMatched) { showToast('Manual split must add up to the total'); return }
 
     setSaving(true)
     try {
+      const splitAmounts = splitMode === 'manual'
+        ? Object.fromEntries(splitIds.map(id => [id, (parseFloat(manualAmounts[id]) || 0) * effectiveRate]))
+        : undefined
       const payload = {
         groupId,
         paidBy,
@@ -215,6 +266,7 @@ export default function NewExpenseScreen() {
         category,
         date,
         splitBetweenMemberIds: splitIds,
+        splitAmounts,
         receiptImageUrl: receiptImageUrl ?? undefined,
       }
       if (isEditing) {
@@ -230,6 +282,8 @@ export default function NewExpenseScreen() {
       refresh()
       setAmount('')
       setTitle('')
+      setSplitMode('equal')
+      setManualAmounts({})
       showToast('Expense saved')
     } catch (e: any) {
       showToast(e.message)
@@ -365,13 +419,35 @@ export default function NewExpenseScreen() {
       <View style={s.field}>
         <View style={s.splitHeaderRow}>
           <Text style={s.fieldLabel}>SPLIT BETWEEN</Text>
+          <View style={s.splitModeToggle}>
+            <TouchableOpacity
+              style={[s.splitModeBtn, splitMode === 'equal' && s.splitModeBtnActive]}
+              onPress={() => setSplitMode('equal')}
+            >
+              <Text style={[s.splitModeTxt, splitMode === 'equal' && s.splitModeTxtActive]}>Equal</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[s.splitModeBtn, splitMode === 'manual' && s.splitModeBtnActive]}
+              onPress={() => setSplitMode('manual')}
+            >
+              <Text style={[s.splitModeTxt, splitMode === 'manual' && s.splitModeTxtActive]}>Manual</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {splitMode === 'equal' ? (
           <Text style={s.splitSummary}>
+            {splitIds.length ? `${splitIds.length} people · ${fmt(shareEach)} each` : 'none selected'}
+          </Text>
+        ) : (
+          <Text style={[s.splitSummary, !manualMatched && s.splitSummaryWarn]}>
             {splitIds.length
-              ? `${splitIds.length} people · ${fmt(shareEach)} each`
+              ? `${fmt(manualTotal)} of ${fmt(amountNum)} allocated${manualMatched ? '' : ` · ${fmt(Math.abs(manualDiff))} ${manualDiff > 0 ? 'left' : 'over'}`}`
               : 'none selected'
             }
           </Text>
-        </View>
+        )}
+
         {members.map((m, idx) => {
           const name = m.user?.display_name ?? m.name ?? 'Unknown'
           const on = !!splitBetween[m.id]
@@ -386,7 +462,20 @@ export default function NewExpenseScreen() {
                 <Avatar name={name} index={idx} size={32} />
               </View>
               <Text style={s.splitName}>{name}</Text>
-              {on && <Text style={s.splitShare}>{fmt(shareEach)}</Text>}
+              {on && splitMode === 'equal' && <Text style={s.splitShare}>{fmt(shareEach)}</Text>}
+              {on && splitMode === 'manual' && (
+                <View style={s.manualAmountWrap}>
+                  <Text style={s.manualAmountSym}>{cur.sym}</Text>
+                  <TextInput
+                    style={s.manualAmountInput as any}
+                    value={manualAmounts[m.id] ?? ''}
+                    onChangeText={v => setManualAmount(m.id, v)}
+                    keyboardType="decimal-pad"
+                    placeholder="0"
+                    placeholderTextColor="#A8A296"
+                  />
+                </View>
+              )}
               <View style={[s.checkbox, on && s.checkboxActive]}>
                 {on && <Text style={s.checkmark}>✓</Text>}
               </View>
@@ -433,6 +522,11 @@ export default function NewExpenseScreen() {
         </TouchableOpacity>
       )}
 
+      <KeyboardAvoidingView
+        style={s.keyboardFlex}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : -insets.bottom}
+      >
       {/* ── Header: back + breadcrumb ─────────────────────────── */}
       <View style={s.header}>
         <TouchableOpacity style={s.backBtn} onPress={() => router.back()}>
@@ -570,12 +664,14 @@ export default function NewExpenseScreen() {
           }
         </TouchableOpacity>
       </View>
+      </KeyboardAvoidingView>
     </View>
   )
 }
 
 const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.surface },
+  keyboardFlex: { flex: 1 },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.surface },
 
   // Header + breadcrumb
@@ -663,7 +759,16 @@ const s = StyleSheet.create({
 
   // Split between — vertical toggle rows, correlated with paid-by member list
   splitHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  splitSummary: { fontFamily: 'SpaceGrotesk_700Bold', fontSize: 12, color: Colors.ink },
+  splitSummary: { fontFamily: 'SpaceGrotesk_700Bold', fontSize: 12, color: Colors.ink, marginTop: -4 },
+  splitSummaryWarn: { color: Colors.coral },
+  splitModeToggle: { flexDirection: 'row', backgroundColor: Colors.tabTrack, borderRadius: 10, padding: 3, gap: 3 },
+  splitModeBtn: { paddingVertical: 5, paddingHorizontal: 12, borderRadius: 8 },
+  splitModeBtnActive: { backgroundColor: Colors.card, ...Shadows.dropdown },
+  splitModeTxt: { fontFamily: 'PlusJakartaSans_600SemiBold', fontSize: 12, color: Colors.textTertiary },
+  splitModeTxtActive: { color: Colors.ink },
+  manualAmountWrap: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  manualAmountSym: { fontFamily: 'SpaceGrotesk_700Bold', fontSize: 13, color: Colors.ink },
+  manualAmountInput: { width: 72, paddingVertical: 4, paddingHorizontal: 8, borderWidth: 1.5, borderColor: Colors.border, borderRadius: 8, backgroundColor: Colors.inputFill, fontFamily: 'SpaceGrotesk_700Bold', fontSize: 13, color: Colors.ink, textAlign: 'right' },
   splitRow: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 9, paddingHorizontal: 11, borderRadius: 13, borderWidth: 1.5, borderColor: Colors.borderLight, backgroundColor: Colors.surface, marginTop: 7 },
   splitRowActive: { borderColor: Colors.ink, backgroundColor: Colors.card },
   dimmed: { opacity: 0.4 },

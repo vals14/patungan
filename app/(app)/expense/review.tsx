@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   ScrollView, Image, ActivityIndicator, Platform, Alert,
+  KeyboardAvoidingView,
 } from 'react-native'
 import { router, useLocalSearchParams } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -278,6 +279,11 @@ export default function ReviewScreen() {
     <View style={s.container}>
       <Toast message={toast} visible={!!toast} onHide={() => setToast('')} />
 
+      <KeyboardAvoidingView
+        style={s.keyboardFlex}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : -insets.bottom}
+      >
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
         {/* Header */}
         <View style={s.header}>
@@ -481,12 +487,14 @@ export default function ReviewScreen() {
           {saving ? <ActivityIndicator color={Colors.ink} /> : <Text style={s.saveBtnText}>{isEditing ? 'Save changes' : 'Save expense'}</Text>}
         </TouchableOpacity>
       </View>
+      </KeyboardAvoidingView>
     </View>
   )
 }
 
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.surface },
+  keyboardFlex: { flex: 1 },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.surface },
   content: { paddingHorizontal: Spacing.screenH, paddingTop: 56, paddingBottom: 130, maxWidth: 640, width: '100%', alignSelf: 'center' },
 

@@ -83,11 +83,52 @@ export async function createGroup(name: string, currency: string): Promise<Group
   return group
 }
 
-export async function joinGroupByCode(invite_code: string): Promise<Group> {
+export interface UnclaimedMember {
+  id: string
+  name: string
+}
+
+export interface GroupJoinPreview {
+  groupId: string
+  groupName: string
+  currency: string
+  unclaimedMembers: UnclaimedMember[]
+}
+
+// Looks up a group by invite code without joining it, so the join screen can
+// offer "I'm one of these existing members" before the membership is created.
+export async function previewGroupByCode(invite_code: string): Promise<GroupJoinPreview> {
+  const { data, error } = await supabase
+    .rpc('preview_group_by_code', { p_code: invite_code.toUpperCase() })
+
+  if (error) {
+    const msg = (error.message || '').includes('Group not found')
+      ? 'Group not found. Check the invite code and try again.'
+      : error.message
+    throw new Error(msg)
+  }
+  if (!data || data.length === 0) {
+    throw new Error('Group not found. Check the invite code and try again.')
+  }
+
+  const first = data[0]
+  return {
+    groupId: first.group_id,
+    groupName: first.group_name,
+    currency: first.group_currency,
+    unclaimedMembers: data
+      .filter((r: any) => r.member_id)
+      .map((r: any) => ({ id: r.member_id, name: r.member_name })),
+  }
+}
+
+export async function joinGroupByCode(invite_code: string, claimMemberId?: string): Promise<Group> {
   // Look up + join via a SECURITY DEFINER RPC. A non-member can't SELECT the
   // group by code directly (members-only RLS), so the function does it safely.
+  // If claimMemberId is given, that existing (manual) member row is taken over
+  // instead of creating a new one — its name is overwritten with this user's.
   const { data: groupId, error } = await supabase
-    .rpc('join_group_by_code', { p_code: invite_code.toUpperCase() })
+    .rpc('join_group_by_code', { p_code: invite_code.toUpperCase(), p_claim_member_id: claimMemberId ?? null })
 
   if (error) {
     const msg = (error.message || '').includes('Group not found')

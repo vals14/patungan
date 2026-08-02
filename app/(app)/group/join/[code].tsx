@@ -1,24 +1,16 @@
 import { useEffect } from 'react'
-import { View, ActivityIndicator, Alert, StyleSheet } from 'react-native'
+import { View, ActivityIndicator, StyleSheet } from 'react-native'
 import { useLocalSearchParams, router } from 'expo-router'
-import { joinGroupByCode } from '../../../../src/services/groupService'
 
+// Deep-link entry (patungan://join/CODE) — hands off to the join prompt so the
+// user still gets the "new member or one of these existing members?" choice
+// instead of silently auto-joining.
 export default function JoinByCodeScreen() {
   const { code } = useLocalSearchParams<{ code: string }>()
 
   useEffect(() => {
-    async function join() {
-      if (!code) return
-      try {
-        const group = await joinGroupByCode(code)
-        router.replace(`/(app)/group/${group.id}`)
-      } catch (e: any) {
-        Alert.alert('Could not join', e.message, [
-          { text: 'OK', onPress: () => router.replace('/(app)/home') },
-        ])
-      }
-    }
-    join()
+    if (!code) return
+    router.replace({ pathname: '/(app)/group/join/prompt', params: { code } })
   }, [code])
 
   return (

@@ -12,7 +12,20 @@ export interface CreateSimpleExpenseInput {
   category: ExpenseCategory
   date: string
   splitBetweenMemberIds: string[]
+  // Explicit per-member amounts (in the group's currency), for a manual split.
+  // Omitted (or missing an id) falls back to an equal share among splitBetweenMemberIds.
+  splitAmounts?: Record<string, number>
   receiptImageUrl?: string
+}
+
+function buildSplitRows(expenseId: string, input: CreateSimpleExpenseInput) {
+  const amountEach = input.amountInGroupCurrency / input.splitBetweenMemberIds.length
+  return input.splitBetweenMemberIds.map(memberId => ({
+    expense_id: expenseId,
+    user_id: memberId,
+    amount_owed: Math.round((input.splitAmounts?.[memberId] ?? amountEach) * 100) / 100,
+    is_settled: false,
+  }))
 }
 
 export async function createSimpleExpense(input: CreateSimpleExpenseInput): Promise<Expense> {
@@ -37,14 +50,7 @@ export async function createSimpleExpense(input: CreateSimpleExpenseInput): Prom
 
   if (input.splitBetweenMemberIds.length > 0) {
     // Splits are stored in the group's currency so balances are directly summable.
-    const amountEach = input.amountInGroupCurrency / input.splitBetweenMemberIds.length
-    const splitRows = input.splitBetweenMemberIds.map(memberId => ({
-      expense_id: expense.id,
-      user_id: memberId,
-      amount_owed: Math.round(amountEach * 100) / 100,
-      is_settled: false,
-    }))
-    const { error: splitError } = await supabase.from('expense_splits').insert(splitRows)
+    const { error: splitError } = await supabase.from('expense_splits').insert(buildSplitRows(expense.id, input))
     if (splitError) throw splitError
   }
 
@@ -187,7 +193,7 @@ export async function getExpenseById(expenseId: string): Promise<any> {
     .from('expenses')
     .select(`
       *,
-      expense_splits ( user_id )
+      expense_splits ( user_id, amount_owed )
     `)
     .eq('id', expenseId)
     .single()
@@ -226,14 +232,7 @@ export async function updateSimpleExpense(
   if (delError) throw delError
 
   if (input.splitBetweenMemberIds.length > 0) {
-    const amountEach = input.amountInGroupCurrency / input.splitBetweenMemberIds.length
-    const splitRows = input.splitBetweenMemberIds.map(memberId => ({
-      expense_id: expenseId,
-      user_id: memberId,
-      amount_owed: Math.round(amountEach * 100) / 100,
-      is_settled: false,
-    }))
-    const { error: splitError } = await supabase.from('expense_splits').insert(splitRows)
+    const { error: splitError } = await supabase.from('expense_splits').insert(buildSplitRows(expenseId, input))
     if (splitError) throw splitError
   }
 
