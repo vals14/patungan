@@ -44,6 +44,7 @@ const TILE_PALETTE = [
 const CURRENCY_NAMES: Record<string, string> = {
   IDR: 'Rupiah', USD: 'Dollar', EUR: 'Euro', SGD: 'Dollar',
   MYR: 'Ringgit', GBP: 'Pound', AUD: 'Dollar', JPY: 'Yen', THB: 'Baht',
+  VND: 'Dong', TWD: 'Dollar',
 }
 
 // ── SVG icon helper (web only) ────────────────────────────────────────────────

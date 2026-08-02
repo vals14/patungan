@@ -23,6 +23,10 @@ const CURRENCIES = [
   { code: 'SGD', sym: 'S$', rate: 12000, name: 'Singapore Dollar' },
   { code: 'EUR', sym: '€', rate: 17500, name: 'Euro' },
   { code: 'AUD', sym: 'A$', rate: 10800, name: 'Australian Dollar' },
+  { code: 'GBP', sym: '£', rate: 20300, name: 'British Pound' },
+  { code: 'MYR', sym: 'RM', rate: 3400, name: 'Malaysian Ringgit' },
+  { code: 'VND', sym: '₫', rate: 0.65, name: 'Vietnamese Dong' },
+  { code: 'TWD', sym: 'NT$', rate: 500, name: 'Taiwan Dollar' },
 ]
 
 const CATEGORIES: { key: ExpenseCategory; emoji: string; label: string }[] = [

@@ -20,7 +20,12 @@
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.RECORD_AUDIO"
+      ],
+      "package": "vals.patungan"
     },
     "web": {
       "bundler": "metro",
@@ -42,6 +47,16 @@
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "e90ce65c-84d6-4211-b2e4-054c1f0735e6"
+      }
+    },
+    "owner": "vals14",
+    "updates": {
+      "url": "https://u.expo.dev/e90ce65c-84d6-4211-b2e4-054c1f0735e6"
     }
   }
 }

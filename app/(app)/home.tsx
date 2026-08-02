@@ -55,6 +55,10 @@ const CURRENCIES = [
   { code: 'USD', symbol: '$',  name: 'US Dollar' },
   { code: 'EUR', symbol: '€',  name: 'Euro' },
   { code: 'SGD', symbol: 'S$', name: 'Singapore Dollar' },
+  { code: 'GBP', symbol: '£',  name: 'British Pound' },
+  { code: 'MYR', symbol: 'RM', name: 'Malaysian Ringgit' },
+  { code: 'VND', symbol: '₫',  name: 'Vietnamese Dong' },
+  { code: 'TWD', symbol: 'NT$', name: 'Taiwan Dollar' },
 ]
 
 function greeting() {
