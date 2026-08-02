@@ -240,7 +240,7 @@ export default function ReviewScreen() {
     try {
       if (isEditing) await updateExpenseWithSplits(params.expenseId!, input, splits)
       else await createExpenseWithSplits(input, splits)
-      router.replace(`/(app)/group/${params.groupId}`)
+      router.navigate(`/(app)/group/${params.groupId}`)
     } catch (e: any) {
       showToast(e.message ?? 'Could not save')
       setSaving(false)
@@ -261,7 +261,7 @@ export default function ReviewScreen() {
     setDeleting(true)
     try {
       await deleteExpense(params.expenseId)
-      router.replace(`/(app)/group/${params.groupId}`)
+      router.navigate(`/(app)/group/${params.groupId}`)
     } catch (e: any) {
       showToast(e.message ?? 'Could not delete')
       setDeleting(false)

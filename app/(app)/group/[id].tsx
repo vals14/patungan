@@ -171,7 +171,7 @@ export default function GroupDetailScreen() {
   useEffect(() => {
     if (!id) return
     const channel = supabase
-      .channel(`group-${id}`)
+      .channel(`group-${id}-${Date.now()}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'expenses', filter: `group_id=eq.${id}` }, () => loadData())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'settlements', filter: `group_id=eq.${id}` }, () => loadData())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'group_members', filter: `group_id=eq.${id}` }, () => loadData())
